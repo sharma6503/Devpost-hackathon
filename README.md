@@ -255,6 +255,4 @@ make check
 ---
 
 ## 📄 License & Support
-
-Maintained by the **Ingram Micro AI Center of Excellence (AI CoE)**.  
-For questions, support, or contributions, contact [gds_aicoe@ingrammicro.com](mailto:gds_aicoe@ingrammicro.com).
+For questions, support, or contributions, contact [sharmaasharmaa50@gmail.com]
