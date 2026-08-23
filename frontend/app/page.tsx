@@ -629,7 +629,7 @@ function MainChatLayout() {
         {
           userId,
           sessionId: newSessionId,
-          messageText: trimmed || `Please audit the attached codebase: ${fileToUpload?.name || "codebase.zip"}`,
+          messageText: trimmed || ` ${fileToUpload?.name || "codebase.zip"}`,
           displayText: userDisplayMessage,
           appName: activeAppName,
           inlineFiles,

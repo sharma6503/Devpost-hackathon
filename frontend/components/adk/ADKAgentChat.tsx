@@ -242,7 +242,7 @@ export function ADKAgentChat({
       await startAgentReview({
         userId,
         sessionId,
-        messageText: text || `Please audit the attached codebase: ${fileAttached?.name || "codebase.zip"}`,
+        messageText: text || `${fileAttached?.name || "codebase.zip"}`,
         displayText: userDisplayMessage,
         appName,
         inlineFiles,
