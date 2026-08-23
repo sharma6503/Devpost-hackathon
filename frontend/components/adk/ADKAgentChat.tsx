@@ -32,6 +32,7 @@ import {
   removeSession,
   generateSessionId,
   getUserProfile,
+  getSessionCache,
   type StoredSession,
 } from "@/lib/session";
 import type { LogEntry, Session, AdkEvent, ReviewState } from "@/types/adk";
