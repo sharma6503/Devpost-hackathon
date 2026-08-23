@@ -1,0 +1,1690 @@
+<!DOCTYPE html>
+<html class="light" lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+    <title>{{TITLE}} | Agent Guardian Precision Audit</title>
+
+    <!-- Self-contained assets — inlined by html_agent.py at render time; NO external CDNs.
+         Order matters: the icon-font CSS (which sets a default .material-symbols-outlined
+         font-size:24px) must come BEFORE the Tailwind utilities so that text-* size
+         classes win in the cascade. Built offline via tools/report_assets (npm run build)
+         and tools/report_assets/fetch_assets.ps1. -->
+    <!--AG_ICON_FONT-->
+    <!--AG_TAILWIND_CSS-->
+    <!--AG_CHART_JS-->
+
+    <style>
+        :root {
+            scroll-behavior: smooth;
+        }
+
+        /* ── SCROLL PROGRESS BAR ── */
+        #scroll-progress {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 0%;
+            height: 3px;
+            background: linear-gradient(90deg, #0054a6, #16a34a, #0054a6);
+            background-size: 200% auto;
+            animation: shimmer-bar 2.5s linear infinite;
+            z-index: 9999;
+            transition: width 0.1s linear;
+        }
+
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+        }
+
+        /* ── RESPONSIVE LAYOUT (hand-written, not Tailwind utilities) ──
+           The inlined Tailwind stylesheet is a STATIC file pre-compiled
+           offline (tools/report_assets); it only contains the utility
+           classes that existed in the template when it was last built. A
+           hand-added `md:flex` / `lg:hidden` / `sm:px-8` etc. silently does
+           nothing if that exact class wasn't already in the bundle — no
+           error, the layout just never responds. Anything genuinely new
+           must be plain CSS here instead of a new Tailwind class
+           combination. */
+        @media (max-width: 859px) {
+            #ag-sidebar { display: none; }
+            #ag-mobile-header { display: flex; }
+            #ag-main { margin-left: 0; padding-top: 56px; }
+            #ag-topbar { padding-left: 16px; padding-right: 16px; }
+            .ag-topbar-date-group { display: none; }
+        }
+        @media (min-width: 860px) {
+            #ag-sidebar { display: flex; }
+            #ag-mobile-header { display: none; }
+            #ag-main { margin-left: 16rem; padding-top: 0; }
+            #ag-topbar { padding-left: 32px; padding-right: 32px; }
+            .ag-topbar-date-group { display: inline-block; }
+        }
+        .ag-hero-title {
+            font-size: 24px;
+        }
+        @media (min-width: 1024px) {
+            .ag-hero-title { font-size: 30px; }
+        }
+
+        /* ── GLASS PANEL SYSTEM ── */
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(226, 232, 240, 0.8);
+            transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 4px 18px rgba(0, 44, 119, 0.05);
+        }
+        .glass-panel:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(0, 44, 119, 0.1);
+            border-color: rgba(0, 84, 166, 0.2);
+        }
+
+        /* ── ACTIVE NAV STATE ── */
+        .nav-link {
+            position: relative;
+            transition: all 0.25s ease;
+            color: #475569 !important;
+        }
+        .nav-link:hover {
+            color: #0f172a !important;
+            background: #f1f5f9;
+        }
+        .nav-link-active {
+            background: rgba(0, 84, 166, 0.08) !important;
+            color: #0054a6 !important;
+            font-weight: 700;
+        }
+        .nav-link-active::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 15%;
+            width: 4px;
+            height: 70%;
+            background: #0054a6;
+            border-radius: 0 4px 4px 0;
+        }
+        .nav-link-active .material-symbols-outlined {
+            font-variation-settings: 'FILL' 1;
+            color: #0054a6 !important;
+        }
+
+        /* ── KEYFRAME KINETICS ── */
+        @keyframes shimmer-bar {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+        @keyframes pulse-ring {
+            0% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.35); }
+            70% { box-shadow: 0 0 0 8px rgba(220, 38, 38, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0); }
+        }
+        @keyframes pulse-ring-crit {
+            0% { box-shadow: 0 0 8px rgba(220, 38, 38, 0.4), 0 0 0 0 rgba(220, 38, 38, 0.3); }
+            50% { box-shadow: 0 0 16px rgba(220, 38, 38, 0.7), 0 0 8px rgba(220, 38, 38, 0.15); }
+            100% { box-shadow: 0 0 8px rgba(220, 38, 38, 0.4), 0 0 0 0 rgba(220, 38, 38, 0); }
+        }
+        @keyframes pulse-ring-high {
+            0% { box-shadow: 0 0 6px rgba(234, 88, 12, 0.3), 0 0 0 0 rgba(234, 88, 12, 0.25); }
+            50% { box-shadow: 0 0 12px rgba(234, 88, 12, 0.5), 0 0 6px rgba(234, 88, 12, 0.1); }
+            100% { box-shadow: 0 0 6px rgba(234, 88, 12, 0.3), 0 0 0 0 rgba(234, 88, 12, 0); }
+        }
+        @keyframes pulse-dot {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(0.7); opacity: 0.5; }
+        }
+        @keyframes shimmer {
+            0% { background-position: -400px 0; }
+            100% { background-position: 400px 0; }
+        }
+        @keyframes card-entrance {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes flow-line {
+            0% { background-position: 0% 50%; }
+            100% { background-position: 200% 50%; }
+        }
+        .glowing-flow-line {
+            background: linear-gradient(90deg, #0054a6, #16a34a, #0054a6);
+            background-size: 200% 100%;
+            animation: flow-line 4s linear infinite;
+        }
+
+        /* ── SEVERITY DOT ANIMATIONS ── */
+        .status-chip-dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            animation: pulse-dot 1.8s ease-in-out infinite;
+        }
+
+        /* ── DYNAMIC ENTRY FOR FINDINGS ── */
+        .finding-card-v2 {
+            border: 1px solid #e2e8f0;
+            border-left-width: 4px;
+            border-radius: 12px;
+            background: #ffffff;
+            overflow: hidden;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            opacity: 0;
+            transform: translateY(15px);
+        }
+        .finding-card-v2.card-visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        .finding-card-v2:hover {
+            border-color: rgba(0, 84, 166, 0.3);
+            box-shadow: 0 10px 25px rgba(0, 44, 119, 0.08);
+            transform: translateY(-2px);
+        }
+
+        /* Severity Borders & Tints (Natively Light Theme) */
+        .finding-card-v2.sev-card-critical { border-left-color: #dc2626; }
+        .finding-card-v2.sev-card-critical .finding-card-head { background: rgba(220, 38, 38, 0.04); }
+        .finding-card-v2.sev-card-high { border-left-color: #ea580c; }
+        .finding-card-v2.sev-card-high .finding-card-head { background: rgba(234, 88, 12, 0.04); }
+        .finding-card-v2.sev-card-medium { border-left-color: #d97706; }
+        .finding-card-v2.sev-card-medium .finding-card-head { background: rgba(217, 119, 6, 0.04); }
+        .finding-card-v2.sev-card-low { border-left-color: #16a34a; }
+        .finding-card-v2.sev-card-low .finding-card-head { background: rgba(22, 163, 74, 0.04); }
+        .finding-card-v2.sev-card-info { border-left-color: #0054a6; }
+        .finding-card-v2.sev-card-info .finding-card-head { background: rgba(0, 84, 166, 0.04); }
+
+        .finding-card-head {
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            border-bottom: 1px solid #e2e8f0;
+            min-height: 60px;
+        }
+        .finding-title {
+            font-weight: 700;
+            color: #0f172a !important;
+            font-size: 16px !important;
+            flex-grow: 1;
+            font-family: system-ui, -apple-system, sans-serif;
+            text-align: left;
+            line-height: 1.4 !important;
+        }
+        .finding-num {
+            width: 36px;
+            flex-shrink: 0;
+            font-family: ui-monospace, monospace;
+            font-weight: 800;
+            color: #64748b !important;
+            font-size: 12px !important;
+            text-align: center;
+            background: #f1f5f9 !important;
+            border-radius: 6px;
+            padding: 2px 4px;
+        }
+        .finding-card-body {
+            padding: 18px 20px;
+            color: #475569 !important;
+            font-size: 13px;
+            line-height: 1.6;
+            text-align: left;
+        }
+
+        /* ── EXPLAINER / ACCENT BADGES ── */
+        .precision-audit-pill {
+            color: #0054a6;
+            font-size: 9px;
+            font-weight: 900;
+            letter-spacing: 0.15em;
+            text-transform: uppercase;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        /* ── PROGRESS BARS ── */
+        .animated-bar {
+            height: 6px;
+            border-radius: 9999px;
+            width: 0%;
+            transition: width 1.2s cubic-bezier(0.22, 1, 0.36, 1);
+            background: linear-gradient(90deg, #0054a6, #16a34a);
+        }
+        .animated-bar.bar-visible {
+            width: var(--target-w);
+        }
+
+        /* ── REVEAL ON SCROLL ── */
+        .reveal-on-scroll {
+            opacity: 0;
+            transform: translateY(15px);
+            transition: opacity 0.65s cubic-bezier(0.4, 0, 0.2, 1), transform 0.65s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .reveal-on-scroll.is-visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 5px; height: 5px; }
+        ::-webkit-scrollbar-track { background: #f8fafc; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        /* SCORECARD TABLE (Natively Light Theme) */
+        .scorecard-table thead th {
+            border-bottom: 2px solid #e2e8f0 !important;
+            color: #64748b !important;
+            text-align: left;
+        }
+        .scorecard-table tbody td {
+            color: #334155 !important;
+            border-bottom: 1px solid #f1f5f9 !important;
+            text-align: left;
+        }
+        .scorecard-table tbody tr:hover td {
+            background-color: #f8fafc !important;
+        }
+
+        /* ── GOVERNANCE SCORECARD & TIER STYLING ── */
+        .gov-scope {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            text-align: left;
+        }
+        .gov-status-row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 12px;
+            padding: 14px 18px;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            margin-bottom: 8px;
+            text-align: left;
+        }
+        .gov-status-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 14px;
+            background: #ffffff;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+            font-size: 12px;
+            font-weight: 700;
+        }
+        .gov-status-chip .chip-label {
+            color: #64748b;
+            text-transform: uppercase;
+            font-size: 10px;
+            letter-spacing: 0.05em;
+        }
+        .gov-status-chip .chip-val {
+            color: #0f172a;
+            font-weight: 800;
+        }
+        .gov-tier-container {
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0, 44, 119, 0.04);
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            text-align: left;
+        }
+        .gov-tier-container:hover {
+            border-color: rgba(0, 84, 166, 0.25);
+            box-shadow: 0 8px 20px rgba(0, 44, 119, 0.08);
+        }
+        .gov-tier-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 20px;
+            background: #f8fafc;
+            border-bottom: 1px solid #e2e8f0;
+            text-align: left;
+        }
+        .gov-tier-tier1 .gov-tier-header {
+            border-left: 4px solid #0054a6;
+            background: rgba(0, 84, 166, 0.03);
+        }
+        .gov-tier-tier2 .gov-tier-header {
+            border-left: 4px solid #d97706;
+            background: rgba(217, 119, 6, 0.03);
+        }
+        .gov-tier-tier3 .gov-tier-header {
+            border-left: 4px solid #dc2626;
+            background: rgba(220, 38, 38, 0.03);
+        }
+        .gov-tier-title-wrap {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            text-align: left;
+        }
+        .gov-tier-title-wrap .material-symbols-outlined {
+            font-size: 20px;
+            color: #0054a6;
+        }
+        .gov-tier-name {
+            font-size: 15px;
+            font-weight: 800;
+            color: #0f172a;
+            letter-spacing: -0.01em;
+            text-align: left;
+        }
+        .gov-tier-tally {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 11px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .gov-tally-pass {
+            color: #16a34a;
+            background: #dcfce7;
+            padding: 3px 8px;
+            border-radius: 6px;
+            border: 1px solid #bbf7d0;
+        }
+        .gov-tally-warn {
+            color: #d97706;
+            background: #fef3c7;
+            padding: 3px 8px;
+            border-radius: 6px;
+            border: 1px solid #fde68a;
+        }
+        .gov-tally-fail {
+            color: #dc2626;
+            background: #fee2e2;
+            padding: 3px 8px;
+            border-radius: 6px;
+            border: 1px solid #fca5a5;
+        }
+        .gov-tier-body {
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            text-align: left;
+        }
+        .gov-empty {
+            font-size: 13px;
+            font-weight: 600;
+            color: #94a3b8;
+            font-style: italic;
+            padding: 12px 0;
+            text-align: left;
+        }
+
+        /* BLUEPRINT NODES (Natively Light Theme) */
+        .adk-blueprint-node {
+            background: #ffffff !important;
+            border: 1px solid #e2e8f0 !important;
+        }
+        .adk-blueprint-node:hover {
+            border-color: #0054a6 !important;
+            box-shadow: 0 4px 12px rgba(0, 84, 166, 0.05);
+        }
+
+        /* EXPERT EVIDENCE CARD DETAILS (Natively Light Theme) */
+        .expert-card-details {
+            background-color: #ffffff !important;
+            border-color: #e2e8f0 !important;
+        }
+        .expert-card-details summary {
+            background: linear-gradient(to right, #f8fafc, #ffffff) !important;
+            border-bottom-color: #e2e8f0 !important;
+        }
+
+        /* ── FINDINGS CARD SUB-ELEMENT STYLING ── */
+        .finding-card-body {
+            font-size: 15px !important;
+            line-height: 1.7 !important;
+        }
+        .finding-leftover {
+            font-size: 15px !important;
+            line-height: 1.7 !important;
+            color: #334155 !important;
+            margin-bottom: 14px !important;
+            text-align: left;
+        }
+        .finding-leftover p {
+            font-size: 15px !important;
+            line-height: 1.7 !important;
+            color: #334155 !important;
+            margin-bottom: 8px !important;
+        }
+        .finding-leftover li {
+            font-size: 15px !important;
+            line-height: 1.7 !important;
+            color: #334155 !important;
+        }
+        .finding-row-card {
+            border-radius: 8px !important;
+            margin-bottom: 12px !important;
+            padding: 14px 16px !important;
+            border: 1px solid rgba(226, 232, 240, 0.8) !important;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02) !important;
+            transition: border-color 0.2s ease;
+            text-align: left;
+        }
+        .finding-row-card:last-child {
+            margin-bottom: 0 !important;
+        }
+        .finding-row-card:hover {
+            border-color: rgba(0, 84, 166, 0.15) !important;
+        }
+        .finding-row-label {
+            display: inline-flex !important;
+            align-items: center !important;
+            gap: 6px !important;
+            font-family: system-ui, -apple-system, sans-serif !important;
+            font-size: 11px !important;
+            font-weight: 800 !important;
+            text-transform: uppercase !important;
+            letter-spacing: 0.08em !important;
+            margin-bottom: 8px !important;
+        }
+        .finding-row-body {
+            font-size: 15px !important;
+            line-height: 1.7 !important;
+            color: #334155 !important;
+            text-align: left;
+        }
+        .finding-row-body p {
+            font-size: 15px !important;
+            line-height: 1.7 !important;
+            color: #334155 !important;
+            margin-bottom: 8px !important;
+        }
+        .finding-row-body p:last-child {
+            margin-bottom: 0 !important;
+        }
+        .finding-row-body ul, .finding-row-body ol {
+            padding-left: 20px !important;
+            margin: 8px 0 !important;
+        }
+        .finding-row-body li {
+            font-size: 15px !important;
+            line-height: 1.7 !important;
+            color: #334155 !important;
+            margin-bottom: 4px !important;
+            list-style-position: outside !important;
+        }
+        .finding-row-body ul li {
+            list-style-type: disc !important;
+        }
+        .finding-row-body ol li {
+            list-style-type: decimal !important;
+        }
+        .finding-row-body table {
+            width: 100% !important;
+            border-collapse: collapse !important;
+            margin: 12px 0 !important;
+            font-size: 12px !important;
+        }
+        .finding-row-body th {
+            background-color: #f8fafc !important;
+            border-bottom: 2px solid #e2e8f0 !important;
+            padding: 8px 12px !important;
+            font-weight: 700 !important;
+            color: #475569 !important;
+            text-align: left;
+        }
+        .finding-row-body td {
+            border-bottom: 1px solid #f1f5f9 !important;
+            padding: 8px 12px !important;
+            color: #334155 !important;
+            text-align: left;
+        }
+
+        /* Cap stray Markdown headings inside finding/governance prose — a
+           misformatted remediation snippet can render as an H1/H2 instead of
+           code; without this it balloons to the browser's default heading
+           size instead of reading as part of the finding body. */
+        .finding-card-body h1, .finding-card-body h2, .finding-card-body h3,
+        .finding-card-body h4, .finding-card-body h5, .finding-card-body h6,
+        .finding-row-body h1, .finding-row-body h2, .finding-row-body h3,
+        .finding-row-body h4, .finding-row-body h5, .finding-row-body h6,
+        .finding-leftover h1, .finding-leftover h2, .finding-leftover h3,
+        .finding-leftover h4, .finding-leftover h5, .finding-leftover h6 {
+            font-size: 15px !important;
+            font-weight: 700 !important;
+            line-height: 1.5 !important;
+            margin: 12px 0 8px !important;
+            color: #0f172a !important;
+        }
+
+        /* Inline Code */
+        .finding-card-body code {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
+            font-size: 12.5px !important; /* Perfect proportion next to 15px body text */
+            font-weight: 600 !important;
+            background-color: #f1f5f9 !important;
+            border: 1px solid #cbd5e1 !important;
+            border-radius: 4px !important;
+            padding: 2px 5px !important;
+            color: #0f172a !important;
+            word-break: break-word !important;
+        }
+
+        /* Disable Tailwind auto-backticks inside prose */
+        .finding-card-body code::before,
+        .finding-card-body code::after {
+            content: "" !important;
+        }
+
+        /* Fenced Code Blocks */
+        .finding-card-body pre {
+            position: relative;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
+            background-color: #0f172a !important;
+            color: #e2e8f0 !important; /* Ensure all code text in the block remains highly readable */
+            border: 1px solid #1e293b !important;
+            border-radius: 8px !important;
+            padding: 14px 16px !important;
+            overflow-x: auto !important;
+            margin: 12px 0 !important;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.06) !important;
+            text-align: left;
+        }
+        .finding-card-body pre code {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
+            font-size: 13.5px !important; /* Crisp, perfectly readable code font size */
+            font-weight: 500 !important;
+            color: #e2e8f0 !important;
+            background-color: transparent !important;
+            border: none !important;
+            border-radius: 0 !important;
+            padding: 0 !important;
+            line-height: 1.5 !important;
+            word-break: normal !important;
+            white-space: pre !important;
+        }
+
+        /* Premium custom scrollbar for code blocks */
+        .finding-card-body pre::-webkit-scrollbar {
+            height: 6px !important;
+        }
+        .finding-card-body pre::-webkit-scrollbar-track {
+            background: #0f172a !important;
+            border-radius: 0 0 8px 8px !important;
+        }
+        .finding-card-body pre::-webkit-scrollbar-thumb {
+            background: #334155 !important;
+            border-radius: 3px !important;
+        }
+        .finding-card-body pre::-webkit-scrollbar-thumb:hover {
+            background: #475569 !important;
+        }
+
+        /* ── BEFORE / AFTER CODE SIZING & COMPARISON SYSTEM ── */
+        .before-badge, .after-badge {
+            display: inline-flex !important;
+            align-items: center !important;
+            font-size: 11px !important;
+            font-weight: 800 !important;
+            text-transform: uppercase !important;
+            letter-spacing: 0.05em !important;
+            padding: 4px 8px !important;
+            border-radius: 4px !important;
+            margin-bottom: 8px !important;
+            font-family: system-ui, -apple-system, sans-serif !important;
+        }
+        .before-badge {
+            background-color: #fee2e2 !important; /* light red */
+            color: #b91c1c !important; /* dark red */
+            border: 1px solid #fca5a5 !important;
+        }
+        .after-badge {
+            background-color: #dcfce7 !important; /* light green */
+            color: #15803d !important; /* dark green */
+            border: 1px solid #86efac !important;
+        }
+
+        /* Customize pre elements inside before/after */
+        pre.pre-before {
+            border-left: 4px solid #ef4444 !important; /* thick red left border */
+            background-color: #0f172a !important; /* dark background */
+        }
+        pre.pre-after {
+            border-left: 4px solid #22c55e !important; /* thick green left border */
+            background-color: #0f172a !important; /* dark background */
+        }
+
+        /* Clean up bullet lists containing Before/After */
+        .finding-row-body ul li:has(.before-badge),
+        .finding-row-body ul li:has(.after-badge) {
+            list-style-type: none !important;
+            padding-left: 0 !important;
+            margin-left: 0 !important;
+        }
+
+        /* Print Override styles */
+        .print-only { display: none; }
+        @media print {
+            @page { size: A4; margin: 15mm; }
+            #scroll-progress { display: none !important; }
+            .no-print, aside, header, #theme-toggle { display: none !important; }
+            /* Flex/min-height layout fragments badly across pages — print as
+               plain block flow. */
+            body, main { display: block !important; min-height: 0 !important; }
+            main { margin-left: 0 !important; width: 100% !important; padding: 0 !important; }
+            /* Sections not yet scrolled into view sit at opacity:0 (reveal
+               animation) — without this they print as BLANK pages. */
+            .reveal-on-scroll { opacity: 1 !important; transform: none !important; transition: none !important; }
+            .animated-bar { width: var(--target-w) !important; transition: none !important; }
+            /* Long sections (Evidence, Blueprint) span multiple pages: forcing
+               them unbreakable creates blank/clipped pages. Allow sections to
+               break; keep only page-sized cards atomic. */
+            section { break-inside: auto; margin-bottom: 24px !important; }
+            .finding-card-v2, .adk-blueprint-node { break-inside: avoid; opacity: 1 !important; transform: none !important; }
+            .expert-card-details summary { break-after: avoid; }
+            /* Horizontal scroll containers clip their overflow when printed. */
+            .overflow-x-auto, .custom-scrollbar { overflow: visible !important; }
+            .print-only { display: block !important; }
+
+            /* Keep code blocks readable when printed by inverting colors */
+            .finding-card-body pre {
+                background-color: #f8fafc !important;
+                border-color: #cbd5e1 !important;
+                color: #0f172a !important;
+            }
+            .finding-card-body pre code {
+                color: #0f172a !important;
+            }
+            pre.pre-before {
+                border-left: 4px solid #dc2626 !important;
+                background-color: #fef2f2 !important;
+            }
+            pre.pre-after {
+                border-left: 4px solid #16a34a !important;
+                background-color: #f0fdf4 !important;
+            }
+            .before-badge {
+                border: 1px solid #dc2626 !important;
+                background-color: #fee2e2 !important;
+                color: #b91c1c !important;
+            }
+            .after-badge {
+                border: 1px solid #16a34a !important;
+                background-color: #dcfce7 !important;
+                color: #15803d !important;
+            }
+        }
+
+        /* Copy Button styling */
+        .copy-code-btn {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 8px;
+            background-color: rgba(30, 41, 59, 0.7);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 4px;
+            color: #cbd5e1;
+            font-family: system-ui, -apple-system, sans-serif;
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            cursor: pointer;
+            opacity: 0;
+            transition: opacity 0.2s ease, background-color 0.2s ease;
+            z-index: 10;
+        }
+        .finding-card-body pre:hover .copy-code-btn {
+            opacity: 1;
+        }
+        .copy-code-btn:hover {
+            background-color: rgba(30, 41, 59, 0.95);
+            color: #ffffff;
+            border-color: rgba(255, 255, 255, 0.25);
+        }
+        .copy-code-btn .material-symbols-outlined {
+            font-size: 13px !important;
+        }
+    </style>
+</head>
+
+<body class="bg-surface text-on-surface font-body selection:bg-primary/30 min-h-screen flex flex-col antialiased">
+
+    <!-- ── SCROLL PROGRESS BAR ── -->
+    <div id="scroll-progress"></div>
+
+    <!-- ── NAVIGATION SIDEBAR ── -->
+    <aside id="ag-sidebar" class="h-screen w-64 fixed left-0 top-0 border-r border-slate-200 bg-surface-container-low flex flex-col py-6 z-50 no-print">
+        <div class="px-6 mb-8">
+            <!-- TOP LEFT LOGO -->
+            <div class="mb-6 flex flex-col gap-4">
+                {% if LOGO %}<img src="{{LOGO}}" alt="Enterprise Logo" class="h-6 w-auto self-start" />{% endif %}
+                <div class="flex items-center gap-3 py-3 border-y border-slate-200">
+                    <div class="w-8 h-8 bg-surface-container flex items-center justify-center rounded-lg border border-slate-200">
+                        <img src="{{ADK_ICON}}" alt="ADK" class="w-5 h-5 object-contain opacity-90" />
+                    </div>
+                    <div>
+                        <h2 class="text-[10px] font-headline font-bold text-primary tracking-wider uppercase leading-none">Agent Guardian</h2>
+                        <span class="text-[8px] font-label text-slate-500 uppercase tracking-widest mt-1 inline-block">Global Enterprise Auditor</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <nav class="flex-1 space-y-1">
+            <a href="#summary" class="nav-link flex items-center gap-3 px-6 py-3 font-label text-xs font-semibold text-slate-400 hover:bg-surface-container/40 hover:text-white transition-all">
+                <span class="material-symbols-outlined text-lg" style="font-variation-settings: 'wght' 400">dashboard</span>
+                Summary
+            </a>
+            <a href="#governance" class="nav-link flex items-center gap-3 px-6 py-3 font-label text-xs font-semibold text-slate-400 hover:bg-surface-container/40 hover:text-white transition-all">
+                <span class="material-symbols-outlined text-lg">gavel</span>
+                Governance
+            </a>
+            <a href="#findings" class="nav-link flex items-center gap-3 px-6 py-3 font-label text-xs font-semibold text-slate-400 hover:bg-surface-container/40 hover:text-white transition-all">
+                <span class="material-symbols-outlined text-lg">security_update_warning</span>
+                Findings
+            </a>
+            <a href="#metrics" class="nav-link flex items-center gap-3 px-6 py-3 font-label text-xs font-semibold text-slate-400 hover:bg-surface-container/40 hover:text-white transition-all">
+                <span class="material-symbols-outlined text-lg">analytics</span>
+                Metrics
+            </a>
+            <a href="#adk-blueprint" class="nav-link flex items-center gap-3 px-6 py-3 font-label text-xs font-semibold text-slate-400 hover:bg-surface-container/40 hover:text-white transition-all">
+                <span class="material-symbols-outlined text-lg">hub</span>
+                ADK Blueprint
+            </a>
+            <a href="#expert-reviews" class="nav-link flex items-center gap-3 px-6 py-3 font-label text-xs font-semibold text-slate-400 hover:bg-surface-container/40 hover:text-white transition-all">
+                <span class="material-symbols-outlined text-lg">clinical_notes</span>
+                Evidence
+            </a>
+        </nav>
+
+        <div class="px-4 mt-auto">
+            <button onclick="window.print()" class="w-full py-3 px-4 rounded bg-gradient-to-br from-primary to-primary-container text-white font-headline font-bold text-xs uppercase tracking-widest active:scale-95 transition-transform shadow-lg shadow-primary/10">
+                Print Report
+            </button>
+            <div class="mt-4 flex items-center px-2 text-[9px] font-bold text-slate-500 uppercase tracking-widest">
+                <span>© 2026 Agent Guardian</span>
+            </div>
+        </div>
+    </aside>
+
+    <!-- ── MOBILE HEADER ── -->
+    <header id="ag-mobile-header" class="fixed top-0 w-full h-14 bg-surface-container-low border-b border-slate-200 z-50 flex items-center justify-between px-6 no-print">
+        <div class="flex items-center gap-2">
+            {% if LOGO %}<img src="{{LOGO}}" alt="Logo" class="h-4 w-auto" />{% endif %}
+            <span class="text-xs font-headline font-bold text-primary tracking-wider uppercase">Agent Guardian</span>
+        </div>
+        <button onclick="window.print()" class="p-1.5 text-primary bg-surface-container rounded-full">
+            <span class="material-symbols-outlined text-xl">print</span>
+        </button>
+    </header>
+
+    <!-- ── MAIN VIEWPORT ── -->
+    <main id="ag-main" class="flex-1 flex flex-col min-h-screen">
+        
+        <!-- TopAppBar Shell -->
+        <header id="ag-topbar" class="bg-surface/80 backdrop-blur-md border-b border-slate-200 shadow-sm flex justify-between items-center py-4 w-full sticky top-0 z-40 no-print">
+            <div class="flex items-center gap-4" style="min-width:0;">
+                <span class="text-primary font-headline font-bold uppercase tracking-widest text-sm truncate">Vigilant Lens Audit</span>
+                <div class="ag-topbar-date-group h-4 w-px bg-slate-200 flex-shrink-0"></div>
+                <span class="ag-topbar-date-group text-slate-500 font-label text-xs whitespace-nowrap">Generated {{DATE}}</span>
+            </div>
+            <div class="flex items-center gap-4 flex-shrink-0">
+                <button class="bg-gradient-to-r from-primary to-primary-container px-5 py-2 rounded text-xs font-headline font-bold text-white active:scale-95 transition-all whitespace-nowrap" onclick="window.print()">
+                    Export PDF
+                </button>
+            </div>
+        </header>
+
+        <!-- Dashboard Content -->
+        <div class="p-6 lg:p-10 max-w-6xl mx-auto w-full space-y-12">
+
+            <!-- SECTION 1: HERO & SUMMARY -->
+            <section id="summary" class="grid grid-cols-1 lg:grid-cols-3 gap-6 pt-2 lg:pt-0 reveal-on-scroll">
+                
+                <!-- Large Health Score Bento Card -->
+                <div class="lg:col-span-2 glass-panel border border-slate-200 rounded-xl p-8 flex flex-col justify-between relative overflow-hidden group">
+                    <div class="absolute -right-20 -top-20 w-64 h-64 bg-primary/5 rounded-full blur-3xl group-hover:bg-primary/10 transition-colors"></div>
+                    
+                    <div class="flex flex-wrap justify-between items-start gap-3 z-10">
+                        <div class="space-y-1.5 text-left" style="min-width:0;">
+                            <span class="precision-audit-pill">Precision Audit</span>
+                            <h3 class="ag-hero-title text-slate-900 font-headline font-bold tracking-tight mt-2" style="word-break:break-word;">{{TITLE}}</h3>
+                        </div>
+                        <div id="status-pill" class="flex-shrink-0 mb-1">{{STATUS_DISPLAY}}</div>
+                    </div>
+
+                    <div class="mt-8 flex flex-col md:flex-row items-start md:items-end gap-8 z-10">
+                        <div class="relative w-32 h-32 flex items-center justify-center flex-shrink-0">
+                            <svg class="w-full h-full -rotate-90">
+                                <circle class="text-slate-200" cx="64" cy="64" fill="transparent" r="58" stroke="currentColor" stroke-width="4"></circle>
+                                <circle id="health-ring" class="text-primary" cx="64" cy="64" fill="transparent" r="58" stroke="currentColor" stroke-dasharray="364.42" stroke-dashoffset="364.42" stroke-linecap="round" stroke-width="6" style="transition: stroke-dashoffset 1.8s cubic-bezier(0.22, 1, 0.36, 1);"></circle>
+                            </svg>
+                            <div class="absolute flex flex-col items-center">
+                                <span class="text-3xl font-headline font-bold text-slate-900 tracking-tighter" id="score-val" data-score="{{OVERALL_SCORE}}">{{OVERALL_SCORE}}</span>
+                                <span class="text-[9px] font-label text-slate-500 uppercase tracking-wider">Score</span>
+                            </div>
+                        </div>
+                        <div class="flex-1 space-y-3 pb-2 text-left">
+                            <div class="flex items-center justify-start gap-3">
+                                <span class="text-tertiary text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-tertiary"></span>Grade: {{GRADE}}</span>
+                                <span class="text-primary text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-primary"></span>Certified Audit</span>
+                            </div>
+                            <div class="prose prose-slate max-w-none text-slate-600 text-xs leading-relaxed text-left">
+                                {{EXECUTIVE_SUMMARY}}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Bento Metrics -->
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="bg-white border border-slate-200 rounded-lg p-5 flex flex-col justify-between text-left">
+                        <span class="material-symbols-outlined text-tertiary mb-2 self-start" style="font-variation-settings: 'FILL' 1">verified_user</span>
+                        <div>
+                            <p class="text-slate-500 text-[10px] uppercase font-label font-bold">Confidence</p>
+                            <p class="text-2xl font-headline font-bold text-tertiary tracking-tight">{{CONFIDENCE_SCORE}}%</p>
+                        </div>
+                    </div>
+                    <div class="bg-white border border-slate-200 rounded-lg p-5 flex flex-col justify-between text-left">
+                        <span class="material-symbols-outlined text-primary mb-2 self-start" style="font-variation-settings: 'FILL' 1">shield_with_heart</span>
+                        <div>
+                            <p class="text-slate-500 text-[10px] uppercase font-label font-bold">Rules Scanned</p>
+                            <p class="text-2xl font-headline font-bold text-primary tracking-tight">{{RULES_COUNT}}</p>
+                        </div>
+                    </div>
+                    <div class="col-span-2 bg-white border border-slate-200 rounded-lg p-5 text-left">
+                        <p class="text-slate-500 text-[10px] uppercase font-label font-bold mb-2">Audit Method</p>
+                        <p class="text-slate-600 text-xs leading-relaxed">
+                            A fleet of specialist ADK agents — security, quality, architecture and governance — independently reviewed this codebase and reached a scored consensus.
+                        </p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- SECTION 2: GOVERNANCE -->
+            <section id="governance" class="scroll-mt-20 reveal-on-scroll space-y-6 text-left">
+                <div class="flex flex-col md:flex-row md:items-end justify-between gap-4">
+                    <div class="space-y-1 text-left">
+                        <h2 class="text-[10px] font-headline font-bold tracking-[0.25em] text-slate-500 uppercase text-left">Governance Scorecard</h2>
+                        <h3 class="text-2xl font-headline font-bold text-slate-900 tracking-tight text-left">Policy Adherence</h3>
+                    </div>
+                    <div class="flex items-center gap-3 bg-white px-4 py-2 rounded-lg border border-slate-200 shadow-sm">
+                        <span class="text-[10px] font-label font-bold uppercase tracking-wider text-slate-500">Gate Decision:</span>
+                        {{GATE_DECISION_HTML}}
+                    </div>
+                </div>
+                
+                <div class="bg-white rounded-xl border border-slate-200 p-6 lg:p-8 space-y-6 text-left">
+                    <div class="pb-4 border-b border-slate-200">{{SCORE_BADGE_HTML}}</div>
+                    <div class="overflow-x-auto custom-scrollbar">
+                        {{SCORECARD_HTML}}
+                    </div>
+                </div>
+            </section>
+
+            <!-- SECTION 3: FINDINGS -->
+            <section id="findings" class="scroll-mt-20 reveal-on-scroll space-y-6 text-left">
+                <div class="flex flex-col md:flex-row md:items-end justify-between gap-6">
+                    <div class="space-y-1 text-left">
+                        <h2 class="text-[10px] font-headline font-bold tracking-[0.25em] text-slate-500 uppercase text-left">Audit Intelligence</h2>
+                        <h3 class="text-2xl font-headline font-bold text-slate-900 tracking-tight text-left">Detailed Findings <span class="text-sm text-slate-500 font-normal" id="findings-count"></span></h3>
+                    </div>
+                    
+                    <!-- Filters -->
+                    <div class="flex gap-1.5 flex-wrap items-center">
+                        <button class="sev-filter-btn px-3.5 py-1.5 bg-primary/10 text-primary border border-primary/20 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all" data-filter="all">All</button>
+                        <button class="sev-filter-btn px-3.5 py-1.5 bg-white border border-slate-200 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all hover:bg-error/10 hover:text-error" data-filter="CRITICAL">
+                            <span class="chip-dot bg-error" style="animation: pulse-ring-crit 2s infinite"></span>Critical
+                        </button>
+                        <button class="sev-filter-btn px-3.5 py-1.5 bg-white border border-slate-200 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all hover:bg-orange-500/10 hover:text-orange-600" data-filter="HIGH">
+                            <span class="chip-dot bg-orange-600" style="animation: pulse-ring-high 2s infinite"></span>High
+                        </button>
+                        <button class="sev-filter-btn px-3.5 py-1.5 bg-white border border-slate-200 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all hover:bg-yellow-500/10 hover:text-yellow-600" data-filter="MEDIUM">
+                            <span class="chip-dot bg-yellow-500"></span>Medium
+                        </button>
+                        <button class="sev-filter-btn px-3.5 py-1.5 bg-white border border-slate-200 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all hover:bg-tertiary/10 hover:text-tertiary" data-filter="LOW">
+                            <span class="chip-dot bg-tertiary"></span>Low
+                        </button>
+                    </div>
+                </div>
+
+                <div class="space-y-4 text-left">
+                    {{CONTENT_HTML}}
+                </div>
+            </section>
+
+            <!-- SECTION 4: METRICS -->
+            <section id="metrics" class="scroll-mt-20 reveal-on-scroll space-y-6 text-left">
+                <div class="space-y-1 text-left">
+                    <h2 class="text-[10px] font-headline font-bold tracking-[0.25em] text-slate-500 uppercase text-left">Technical Analytics</h2>
+                    <h3 class="text-2xl font-headline font-bold text-slate-900 tracking-tight text-left">Codebase Metrics</h3>
+                </div>
+                
+                <div class="bg-white p-6 rounded-xl border border-slate-200">
+                    <div class="h-[220px] w-full">
+                        <canvas id="metricsChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Codebase inventory details -->
+                <div class="bg-white border border-slate-200 rounded-xl p-6 text-left">
+                    <h4 class="font-headline font-bold text-slate-900 text-xs uppercase tracking-widest mb-6 flex items-center gap-2 text-left">
+                        <span class="material-symbols-outlined text-primary text-base">list_alt</span>
+                        Technical Inventory Details
+                    </h4>
+                    {{REPO_METADATA_HTML}}
+                </div>
+            </section>
+
+            <!-- SECTION 5: ADK SYSTEM BLUEPRINT -->
+            <section id="adk-blueprint" class="scroll-mt-20 reveal-on-scroll space-y-6 text-left">
+                <div class="space-y-1 text-left">
+                    <h2 class="text-[10px] font-headline font-bold tracking-[0.25em] text-slate-500 uppercase text-left">Framework Reference</h2>
+                    <h3 class="text-2xl font-headline font-bold text-slate-900 tracking-tight text-left">ADK Agent Architecture Blueprint</h3>
+                </div>
+
+                <div class="bg-white border border-slate-200 rounded-xl p-6 lg:p-8 space-y-8 text-left">
+                    <div class="prose prose-slate prose-sm max-w-none text-left">
+                        <p class="text-slate-600 text-sm leading-relaxed max-w-3xl text-left">
+                            Agent Guardian is built entirely upon the <strong>Google Agent Development Kit (ADK)</strong>. 
+                            It implements a deterministic, multi-expert pipeline that models cognitive consensus using autonomous <code>LlmAgent</code> and workflow orchestrations.
+                        </p>
+                    </div>
+
+                    <!-- Flow Diagram Grid with Desktop Connecting Line -->
+                    <div class="relative">
+                        <!-- Desktop animated connecting line -->
+                        <div class="hidden lg:block absolute top-[55px] left-[8%] right-[8%] h-0.5 pointer-events-none z-0">
+                            <div class="w-full h-full glowing-flow-line opacity-20"></div>
+                        </div>
+                        
+                        <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4 relative z-10 text-left">
+                            
+                            <!-- Card 1: Ingestion -->
+                            <div class="adk-blueprint-node p-4 rounded-xl border border-slate-200 bg-slate-50 cursor-pointer hover:border-primary transition-all duration-300" onclick="showAdkDetails('ingestion', this)" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();showAdkDetails('ingestion', this)}">
+                                <span class="text-[9px] font-headline font-black text-primary uppercase block mb-1">01 / AST</span>
+                                <h4 class="text-slate-900 font-headline font-bold text-xs">Ingestion</h4>
+                                <p class="text-slate-500 text-[10px] mt-1 line-clamp-2">AST dependency parser and file graph compiler.</p>
+                            </div>
+                            
+                            <!-- Card 2: Security -->
+                            <div class="adk-blueprint-node p-4 rounded-xl border border-slate-200 bg-slate-50 cursor-pointer hover:border-primary transition-all duration-300" onclick="showAdkDetails('security', this)" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();showAdkDetails('security', this)}">
+                                <span class="text-[9px] font-headline font-black text-error uppercase block mb-1">02 / Aud</span>
+                                <h4 class="text-slate-900 font-headline font-bold text-xs">Security Expert</h4>
+                                <p class="text-slate-500 text-[10px] mt-1 line-clamp-2">OWASP top-10 and logical vulnerability scanner.</p>
+                            </div>
+
+                            <!-- Card 3: Quality -->
+                            <div class="adk-blueprint-node p-4 rounded-xl border border-slate-200 bg-slate-50 cursor-pointer hover:border-primary transition-all duration-300" onclick="showAdkDetails('quality', this)" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();showAdkDetails('quality', this)}">
+                                <span class="text-[9px] font-headline font-black text-orange-600 uppercase block mb-1">03 / Qlt</span>
+                                <h4 class="text-slate-900 font-headline font-bold text-xs">Quality Expert</h4>
+                                <p class="text-slate-500 text-[10px] mt-1 line-clamp-2">Maintainability and clean patterns auditor.</p>
+                            </div>
+
+                            <!-- Card 4: ADK Expert -->
+                            <div class="adk-blueprint-node p-4 rounded-xl border border-slate-200 bg-slate-50 cursor-pointer hover:border-primary transition-all duration-300" onclick="showAdkDetails('adk_expert', this)" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();showAdkDetails('adk_expert', this)}">
+                                <span class="text-[9px] font-headline font-black text-blue-600 uppercase block mb-1">04 / SDK</span>
+                                <h4 class="text-slate-900 font-headline font-bold text-xs">ADK Expert</h4>
+                                <p class="text-slate-500 text-[10px] mt-1 line-clamp-2">Verifies SDK integration and API best practices.</p>
+                            </div>
+
+                            <!-- Card 5: Governance -->
+                            <div class="adk-blueprint-node p-4 rounded-xl border border-slate-200 bg-slate-50 cursor-pointer hover:border-primary transition-all duration-300" onclick="showAdkDetails('governance', this)" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();showAdkDetails('governance', this)}">
+                                <span class="text-[9px] font-headline font-black text-tertiary uppercase block mb-1">05 / GRC</span>
+                                <h4 class="text-slate-900 font-headline font-bold text-xs">Governance</h4>
+                                <p class="text-slate-500 text-[10px] mt-1 line-clamp-2">Confluence GRC checker and Gate Decision maker.</p>
+                            </div>
+
+                            <!-- Card 6: Synthesis -->
+                            <div class="adk-blueprint-node p-4 rounded-xl border border-slate-200 bg-slate-50 cursor-pointer hover:border-primary transition-all duration-300" onclick="showAdkDetails('synthesis', this)" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();showAdkDetails('synthesis', this)}">
+                                <span class="text-[9px] font-headline font-black text-primary uppercase block mb-1">06 / Rpt</span>
+                                <h4 class="text-slate-900 font-headline font-bold text-xs">Synthesis Agent</h4>
+                                <p class="text-slate-500 text-[10px] mt-1 line-clamp-2">Applies water-filling logic & builds HTML artifact.</p>
+                            </div>
+
+                        </div>
+                    </div>
+
+                    <!-- Dynamic Details Panel -->
+                    <div id="adk-details-panel" class="p-6 bg-slate-50 border border-slate-200 rounded-xl space-y-4 transition-all duration-300 text-left">
+                        <!-- Default Active Content: Ingestion -->
+                        <div class="flex items-center gap-3 text-left">
+                            <span class="material-symbols-outlined text-primary text-xl" id="adk-details-icon">terminal</span>
+                            <h4 class="text-slate-900 font-headline font-bold text-base text-left" id="adk-details-title">Ingestion Agent</h4>
+                        </div>
+                        <p class="text-slate-600 text-xs leading-relaxed text-left" id="adk-details-desc">
+                            Responsible for parsing the target codebase directories, constructing abstract syntax trees (AST), tracing package import statements, and compiling the modular file graph.
+                        </p>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                            <div class="p-3 bg-surface-container-low rounded-lg border border-outline-variant/5">
+                                <p class="text-[8px] font-black uppercase text-primary mb-1">Reads State Keys</p>
+                                <code class="text-slate-800 text-[10px]" id="adk-details-reads">code_logic, target_directory</code>
+                            </div>
+                            <div class="p-3 bg-surface-container-low rounded-lg border border-outline-variant/5">
+                                <p class="text-[8px] font-black uppercase text-tertiary mb-1">Writes State Keys</p>
+                                <code class="text-slate-800 text-[10px]" id="adk-details-writes">module_map, logic_file_count, import_tree_json</code>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ADK Runtime Concepts Block -->
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 pt-4 border-t border-outline-variant/10">
+                        <div class="space-y-1">
+                            <h5 class="text-slate-900 font-headline font-bold text-sm">Session State</h5>
+                            <p class="text-slate-600 text-[11px] leading-relaxed">
+                                Represents the short-term memory scratchpad shared by all agents. Facilitates inter-agent variables flow like <code>synthesis_result</code> and <code>temp:loop_exit_requested</code>.
+                            </p>
+                        </div>
+                        <div class="space-y-1">
+                            <h5 class="text-slate-900 font-headline font-bold text-sm">Pre/Post Callbacks</h5>
+                            <p class="text-slate-600 text-[11px] leading-relaxed">
+                                Implements strict custom interceptors like <code>prepare_html_context_callback</code> to load base64 logs and calculate dynamic GRC compliance confidence scores.
+                            </p>
+                        </div>
+                        <div class="space-y-1">
+                            <h5 class="text-slate-900 font-headline font-bold text-sm">Water-Filling optimization</h5>
+                            <p class="text-slate-600 text-[11px] leading-relaxed">
+                                A mathematically optimal binary-search character allocator running inside the synthesis callback to prevent token overflow while maximizing context preservation.
+                            </p>
+                        </div>
+                    </div>
+
+                </div>
+            </section>
+
+            <!-- SECTION 6: EXPERT EVIDENCE -->
+            <section id="expert-reviews" class="scroll-mt-20 pb-12 reveal-on-scroll">
+                <div class="bg-surface-container-low border border-outline-variant/10 rounded-xl p-6 lg:p-10 relative overflow-hidden">
+                    <div class="absolute top-0 right-0 p-6 opacity-[0.03] pointer-events-none">
+                        <span class="material-symbols-outlined text-[150px]">security</span>
+                    </div>
+                    <div class="relative z-10 space-y-8">
+                        <div class="max-w-2xl">
+                            <h2 class="text-[10px] font-headline font-bold tracking-[0.25em] text-primary uppercase mb-3">Specialist Evidence</h2>
+                            <h3 class="text-2xl font-headline font-bold text-slate-900 tracking-tight mb-3">Expert Audit Rationale</h3>
+                            <p class="text-xs text-slate-600 leading-relaxed border-l-2 border-primary pl-4">
+                                Verbatim rationale and technical justification synthesized from the Specialist Agent Fleet. 
+                                Each section provides the underlying evidence used for scoring and gate decisions.
+                            </p>
+                        </div>
+                        <div class="space-y-6">
+                            {{EXPERT_REVIEWS_HTML}}
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+        </div>
+
+        <!-- ── PAGE FOOTER ── -->
+        <footer class="bg-surface-container-lowest py-12 px-8 border-t border-outline-variant/10 flex flex-col md:flex-row justify-between items-start gap-8 mt-auto">
+            <div class="space-y-4">
+                {% if LOGO %}<img src="{{LOGO}}" alt="Logo" class="h-6 w-auto" />{% endif %}
+                <div class="space-y-1">
+                    <p class="text-[10px] font-headline font-bold text-slate-900 uppercase tracking-wider">Agent Guardian</p>
+                    <p class="text-xs text-slate-600 max-w-sm leading-relaxed">
+                        Autonomous risk assessment and GRC policy verification for production-grade agentic environments.
+                    </p>
+                </div>
+            </div>
+            <div class="flex flex-col md:flex-row gap-12 text-[10px] font-bold text-slate-600 uppercase tracking-widest">
+                <div class="space-y-3">
+                    <h4 class="text-slate-900 text-xs">Framework</h4>
+                    <ul class="space-y-1.5">
+                        <li>Google Agent Development Kit</li>
+                        <li>Gemini API</li>
+                        <li>AST Dependency Graph</li>
+                    </ul>
+                </div>
+                <div class="space-y-3">
+                    <h4 class="text-slate-900 text-xs">Assurance</h4>
+                    <ul class="space-y-1.5">
+                        <li>Ref: {{DATE}}</li>
+                        <li>Zero-Trust Safe sandbox</li>
+                        <li>Water-Filling Checked</li>
+                    </ul>
+                </div>
+            </div>
+        </footer>
+    </main>
+
+
+    <script>
+        // Data Injection
+        const metricsData = {{METRICS_JSON}};
+
+        // Navigation Highlighting + Scroll Progress
+        const sections = document.querySelectorAll('section[id]');
+        const navLinks = document.querySelectorAll('.nav-link');
+        const progressBar = document.getElementById('scroll-progress');
+
+        window.addEventListener('scroll', () => {
+            // Scroll progress
+            if (progressBar) {
+                const scrollTop = window.scrollY;
+                const docHeight = document.documentElement.scrollHeight - window.innerHeight;
+                const pct = docHeight > 0 ? (scrollTop / docHeight) * 100 : 0;
+                progressBar.style.width = Math.min(pct, 100) + '%';
+            }
+
+            // Active section
+            let current = "";
+            sections.forEach(section => {
+                const sectionTop = section.offsetTop;
+                if (window.pageYOffset >= (sectionTop - 150)) {
+                    current = section.getAttribute('id');
+                }
+            });
+
+            navLinks.forEach(link => {
+                link.classList.remove('nav-link-active');
+                if (link.getAttribute('href') === `#${current}`) {
+                    link.classList.add('nav-link-active');
+                }
+            });
+        });
+
+        // Reveal on Scroll Observer
+        // threshold:0 → reveal as soon as ANY part of a section enters the viewport.
+        // A non-zero threshold (e.g. 0.05) can NEVER be reached by a section taller
+        // than the viewport — its max intersectionRatio stays below the threshold —
+        // which left the tall, expanded "Evidence" section permanently at opacity:0
+        // (blank). Shorter sections cleared 0.05 fine, so only Evidence broke.
+        const observerOptions = {
+            threshold: 0,
+            rootMargin: "0px 0px -20px 0px"
+        };
+
+        const revealObserver = ("IntersectionObserver" in window)
+            ? new IntersectionObserver((entries, obs) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        entry.target.classList.add('is-visible');
+                        obs.unobserve(entry.target);
+                    }
+                });
+            }, observerOptions)
+            : null;
+
+        function initReveal() {
+            const els = document.querySelectorAll('.reveal-on-scroll');
+            // Fail open: if IntersectionObserver is unavailable, show everything
+            // rather than leaving the report blank.
+            if (!revealObserver) {
+                els.forEach(el => el.classList.add('is-visible'));
+                return;
+            }
+            els.forEach(el => revealObserver.observe(el));
+            // Safety net: reveal any section already in view (covers anchor jumps to
+            // #expert-reviews and any observer miss) without pre-revealing sections
+            // still below the fold, so the scroll animation is preserved for those.
+            setTimeout(() => {
+                els.forEach(el => {
+                    const r = el.getBoundingClientRect();
+                    if (r.top < window.innerHeight && r.bottom > 0) el.classList.add('is-visible');
+                });
+            }, 600);
+        }
+
+        // Findings Filter Logic
+        function initFilters() {
+            const cards = document.querySelectorAll('.finding-card-v2');
+            const filterBtns = document.querySelectorAll('.sev-filter-btn');
+            if (!filterBtns.length) return;
+
+            function setActive(activeBtn) {
+                filterBtns.forEach(b => {
+                    b.classList.remove('bg-primary/20', 'text-primary', 'border-primary/30');
+                    b.classList.add('bg-surface-container');
+                });
+                activeBtn.classList.remove('bg-surface-container');
+                activeBtn.classList.add('bg-primary/20', 'text-primary', 'border-primary/30');
+            }
+
+            filterBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const filter = btn.dataset.filter;
+                    setActive(btn);
+                    let shown = 0;
+                    cards.forEach(card => {
+                        if (filter === 'all') {
+                            card.style.display = 'block';
+                            shown++;
+                        } else {
+                            const sev = (card.dataset.severity || '').toUpperCase();
+                            const match = sev === filter;
+                            card.style.display = match ? 'block' : 'none';
+                            if (match) shown++;
+                        }
+                    });
+                    const counter = document.getElementById('findings-count');
+                    if (counter) counter.textContent = '(Showing ' + shown + ' finding' + (shown !== 1 ? 's' : '') + ')';
+                });
+            });
+        }
+
+        // Interactive Metrics Chart Redesign
+        function initMetricsChart() {
+            if (typeof Chart === 'undefined') return;
+            const ctx = document.getElementById('metricsChart');
+            if (!ctx || !metricsData.scores) return;
+
+            const labels = ["Security", "Quality", "Architecture", "Governance"];
+            const scores = [
+                metricsData.scores.security || 0,
+                metricsData.scores.quality || 0,
+                metricsData.scores.architecture || 0,
+                metricsData.scores.governance || 0
+            ];
+
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: scores,
+                        backgroundColor: [
+                            '#dc2626', // security  (error red)
+                            '#d97706', // quality   (amber)
+                            '#0054a6', // architecture (brand primary)
+                            '#16a34a'  // governance (tertiary green)
+                        ],
+                        borderRadius: 6,
+                        barThickness: 24,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    indexAxis: 'y',
+                    animation: {
+                        duration: 1500,
+                        easing: 'easeOutExpo'
+                    },
+                    scales: {
+                        x: {
+                            beginAtZero: true,
+                            max: 100,
+                            grid: { color: '#e2e8f0' },
+                            ticks: {
+                                font: { size: 10, weight: 'bold', family: 'system-ui, -apple-system, sans-serif' },
+                                color: '#475569'
+                            }
+                        },
+                        y: {
+                            grid: { display: false },
+                            ticks: {
+                                font: { size: 11, weight: 'bold', family: 'system-ui, -apple-system, sans-serif' },
+                                color: '#0f172a'
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: '#0f172a',
+                            borderColor: '#334155',
+                            borderWidth: 1,
+                            padding: 12,
+                            titleFont: { size: 12, weight: 'bold', family: 'system-ui, -apple-system, sans-serif' },
+                            bodyFont: { size: 12, family: 'system-ui, -apple-system, sans-serif' },
+                            cornerRadius: 8,
+                            displayColors: false
+                        }
+                    }
+                }
+            });
+        }
+
+        // Score Circle Animation with counter
+        function animateScore() {
+            const scoreValEl = document.getElementById('score-val');
+            const ring       = document.getElementById('health-ring');
+            if (!ring || !scoreValEl) return;
+
+            const finalScore   = parseInt(scoreValEl.dataset.score || scoreValEl.innerText || '0', 10);
+            const circumference = 2 * Math.PI * 58; // r=58
+            const offset       = circumference - (finalScore / 100) * circumference;
+
+            let color = '#dc2626'; // red (critical)
+            if      (finalScore >= 90) color = '#16a34a'; // green
+            else if (finalScore >= 70) color = '#0054a6'; // brand blue
+            else if (finalScore >= 40) color = '#d97706'; // amber
+
+            ring.style.stroke = color;
+            setTimeout(() => { ring.style.strokeDashoffset = offset; }, 300);
+
+            // Animated counter
+            scoreValEl.innerText = '0';
+            let start = null;
+            const dur = 1400;
+            function step(ts) {
+                if (!start) start = ts;
+                const pct  = Math.min((ts - start) / dur, 1);
+                const ease = 1 - Math.pow(1 - pct, 3); // easeOutCubic
+                scoreValEl.innerText = Math.round(ease * finalScore);
+                if (pct < 1) requestAnimationFrame(step);
+                else scoreValEl.innerText = finalScore;
+            }
+            setTimeout(() => requestAnimationFrame(step), 400);
+        }
+
+        // Staggered card entrance
+        function initCardAnimations() {
+            const cards = document.querySelectorAll('.finding-card-v2');
+            cards.forEach((card, i) => {
+                setTimeout(() => card.classList.add('card-visible'), 100 + i * 80);
+            });
+        }
+
+        // Interactive ADK Architecture Specifications
+        const adkSpecs = {
+            ingestion: {
+                title: "01 / Ingestion Agent",
+                icon: "terminal",
+                desc: "Parses target code directories to construct Abstract Syntax Trees (AST). Resolves dependency packages, tracks internal import statements, and structures modular code logic using deterministic graph theory.",
+                reads: "code_logic, target_directory",
+                writes: "module_map, logic_file_count, import_tree_json"
+            },
+            security: {
+                title: "02 / Security Expert",
+                icon: "gpp_good",
+                desc: "Analyzes AST structure, strings, and modules for OWASP top-10 threats, insecure practices, credential leakage, and path vulnerabilities (e.g. Directory Traversal). Matches codebase against professional static analyzer criteria.",
+                reads: "module_map, code_logic",
+                writes: "security_review_result"
+            },
+            quality: {
+                title: "03 / Quality Expert",
+                icon: "verified",
+                desc: "Measures source code metrics, structural patterns, and maintainability scores. Flags duplicate logic block instances, complex loops, and potential refactoring areas to guarantee production code hygiene.",
+                reads: "module_map, code_logic",
+                writes: "quality_review_result"
+            },
+            adk_expert: {
+                title: "04 / ADK Expert",
+                icon: "hub",
+                desc: "Audits target repository logic for native SDK integration compatibility. Verifies proper usage of ADK LlmAgents, sessions state keys, callback routines, and overall multi-agent architecture guidelines.",
+                reads: "module_map, code_logic, confluence_rules",
+                writes: "adk_review_result"
+            },
+            governance: {
+                title: "05 / Governance Expert",
+                icon: "gavel",
+                desc: "Cross-checks expert reviews and synthesized findings against active enterprise policies sourced directly from Confluence GRC spaces. Approves or Rejects publication gate decisions.",
+                reads: "confluence_rules, security_review_result, quality_review_result",
+                writes: "governance_review_result, gate_decision"
+            },
+            synthesis: {
+                title: "06 / Synthesis Agent",
+                icon: "summarize",
+                desc: "Collates discrete specialist reviews into a structured executive narrative. Automatically scales context and token bounds using the Binary Search Water-Filling optimizer, compiling the final premium report.",
+                reads: "synthesis_result, review_metrics, expert_reviews",
+                writes: "html_report_content, saved_report_artifact"
+            }
+        };
+
+        function showAdkDetails(key, element) {
+            const spec = adkSpecs[key];
+            if (!spec) return;
+
+            // Update UI elements
+            document.getElementById('adk-details-title').innerText = spec.title;
+            document.getElementById('adk-details-icon').innerText = spec.icon;
+            document.getElementById('adk-details-desc').innerText = spec.desc;
+            document.getElementById('adk-details-reads').innerText = spec.reads;
+            document.getElementById('adk-details-writes').innerText = spec.writes;
+
+            // Stagger animation transition
+            const panel = document.getElementById('adk-details-panel');
+            panel.style.transform = 'scale(0.98)';
+            panel.style.opacity = '0.8';
+            setTimeout(() => {
+                panel.style.transform = 'scale(1)';
+                panel.style.opacity = '1';
+            }, 100);
+
+            // Highlight selected node
+            document.querySelectorAll('.adk-blueprint-node').forEach(node => {
+                node.classList.remove('border-primary', 'bg-primary/5', 'shadow-[0_0_15px_rgba(0,209,255,0.15)]');
+            });
+            
+            const activeNode = element || document.querySelector('.adk-blueprint-node');
+            if (activeNode) {
+                activeNode.classList.add('border-primary', 'bg-primary/5', 'shadow-[0_0_15px_rgba(0,209,255,0.15)]');
+            }
+        }
+
+        // ── PRINT SAFETY NET ──
+        // Print CSS already forces reveal-on-scroll/bars visible, but two things
+        // CSS cannot fix: (1) collapsed <details> simply don't print their
+        // content, and (2) finding cards hidden by a severity filter
+        // (display:none) vanish from the printout. Snapshot + normalize before
+        // printing, restore after.
+        const _printRestore = [];
+        function _preparePrint() {
+            document.querySelectorAll('.reveal-on-scroll').forEach(el => el.classList.add('is-visible'));
+            document.querySelectorAll('.animated-bar').forEach(el => el.classList.add('bar-visible'));
+            document.querySelectorAll('details:not([open])').forEach(d => {
+                _printRestore.push(() => d.removeAttribute('open'));
+                d.setAttribute('open', '');
+            });
+            document.querySelectorAll('.finding-card-v2').forEach(card => {
+                if (card.style.display === 'none') {
+                    _printRestore.push(() => { card.style.display = 'none'; });
+                    card.style.display = 'block';
+                }
+            });
+            // Re-render responsive charts for the reflowed (sidebar-less) print
+            // layout — otherwise the canvas can print stretched or blank.
+            if (window.Chart && Chart.instances) {
+                Object.values(Chart.instances).forEach(c => { try { c.resize(); } catch (e) {} });
+                _printRestore.push(() => {
+                    Object.values(Chart.instances).forEach(c => { try { c.resize(); } catch (e) {} });
+                });
+            }
+        }
+        function _restoreAfterPrint() {
+            while (_printRestore.length) _printRestore.pop()();
+        }
+        window.addEventListener('beforeprint', _preparePrint);
+        window.addEventListener('afterprint', _restoreAfterPrint);
+        // Safari < 16 fallback: matchMedia-based print detection
+        if (window.matchMedia) {
+            window.matchMedia('print').addEventListener?.('change', (mq) => {
+                if (mq.matches) _preparePrint(); else _restoreAfterPrint();
+            });
+        }
+
+        // ── FORMAT BEFORE/AFTER COMPARISON PANELS ──
+        function formatBeforeAfterBlocks() {
+            const bodies = document.querySelectorAll(".finding-row-body, .finding-leftover");
+
+            bodies.forEach(body => {
+                const items = Array.from(body.querySelectorAll("li, p"));
+
+                let i = 0;
+                while (i < items.length) {
+                    const el = items[i];
+                    const strong = el.querySelector("strong");
+                    if (!strong) {
+                        i++;
+                        continue;
+                    }
+
+                    const text = strong.textContent.trim().replace(/:$/, "").trim().toLowerCase();
+                    if (text === "before" || text === "before:") {
+                        // Found a "Before" block!
+                        // Search for a corresponding "After" block within the next 4 elements
+                        let afterEl = null;
+                        let afterIndex = -1;
+
+                        for (let j = i + 1; j < Math.min(i + 5, items.length); j++) {
+                            const nextEl = items[j];
+                            const nextStrong = nextEl.querySelector("strong");
+                            if (nextStrong) {
+                                const nextText = nextStrong.textContent.trim().replace(/:$/, "").trim().toLowerCase();
+                                if (nextText === "after" || nextText === "after:") {
+                                    afterEl = nextEl;
+                                    afterIndex = j;
+                                    break;
+                                }
+                            }
+                        }
+
+                        // Locate code pre blocks
+                        let preBefore = el.querySelector("pre");
+                        if (!preBefore && el.nextElementSibling && el.nextElementSibling.tagName === "PRE") {
+                            preBefore = el.nextElementSibling;
+                        }
+
+                        let preAfter = null;
+                        if (afterEl) {
+                            preAfter = afterEl.querySelector("pre");
+                            if (!preAfter && afterEl.nextElementSibling && afterEl.nextElementSibling.tagName === "PRE") {
+                                preAfter = afterEl.nextElementSibling;
+                            }
+                        }
+
+                        if (preBefore && preAfter) {
+                            // Style the badges beautifully
+                            strong.className = "before-badge";
+                            strong.innerHTML = '<span class="material-symbols-outlined" style="font-size:12px;vertical-align:middle;margin-right:4px;">warning</span>Original Code (Before)';
+
+                            const afterStrong = afterEl.querySelector("strong");
+                            afterStrong.className = "after-badge";
+                            afterStrong.innerHTML = '<span class="material-symbols-outlined" style="font-size:12px;vertical-align:middle;margin-right:4px;">gpp_good</span>Remediated Code (After)';
+
+                            preBefore.className = "pre-before";
+                            preAfter.className = "pre-after";
+
+                            // Create the side-by-side comparison grid container (use <li> if inside a list)
+                            const isList = el.tagName === "LI" || (el.parentNode && (el.parentNode.tagName === "UL" || el.parentNode.tagName === "OL"));
+                            const grid = document.createElement(isList ? "li" : "div");
+                            grid.className = "grid grid-cols-1 lg:grid-cols-2 gap-4 my-4" + (isList ? " list-none" : "");
+
+                            const divBefore = document.createElement("div");
+                            divBefore.className = "flex flex-col";
+                            while (el.firstChild) {
+                                divBefore.appendChild(el.firstChild);
+                            }
+                            if (preBefore.parentNode === el.parentNode) {
+                                divBefore.appendChild(preBefore);
+                            }
+
+                            const divAfter = document.createElement("div");
+                            divAfter.className = "flex flex-col";
+                            while (afterEl.firstChild) {
+                                divAfter.appendChild(afterEl.firstChild);
+                            }
+                            if (preAfter.parentNode === afterEl.parentNode) {
+                                divAfter.appendChild(preAfter);
+                            }
+
+                            grid.appendChild(divBefore);
+                            grid.appendChild(divAfter);
+
+                            el.parentNode.insertBefore(grid, el);
+                            el.remove();
+                            afterEl.remove();
+
+                            // Advance index past the After element we processed
+                            i = afterIndex + 1;
+                            continue;
+                        } else if (preBefore) {
+                            // Only "Before" block found without "After"
+                            strong.className = "before-badge";
+                            strong.innerHTML = '<span class="material-symbols-outlined" style="font-size:12px;vertical-align:middle;margin-right:4px;">warning</span>Original Code (Before)';
+                            preBefore.className = "pre-before";
+
+                            if (el.tagName === "LI") {
+                                el.style.listStyleType = "none";
+                                el.style.paddingLeft = "0";
+                                el.style.marginLeft = "0";
+                            }
+                        }
+                    } else if (text === "after" || text === "after:") {
+                        // Individual "After" block without "Before"
+                        let preAfter = el.querySelector("pre");
+                        if (!preAfter && el.nextElementSibling && el.nextElementSibling.tagName === "PRE") {
+                            preAfter = el.nextElementSibling;
+                        }
+
+                        if (preAfter) {
+                            strong.className = "after-badge";
+                            strong.innerHTML = '<span class="material-symbols-outlined" style="font-size:12px;vertical-align:middle;margin-right:4px;">gpp_good</span>Remediated Code (After)';
+                            preAfter.className = "pre-after";
+
+                            if (el.tagName === "LI") {
+                                el.style.listStyleType = "none";
+                                el.style.paddingLeft = "0";
+                                el.style.marginLeft = "0";
+                            }
+                        }
+                    }
+                    i++;
+                }
+            });
+        }
+
+        // ── COPY TO CLIPBOARD COMPONENT ──
+        function initCopyButtons() {
+            const pres = document.querySelectorAll(".finding-card-body pre, .expert-review-body pre");
+            pres.forEach(pre => {
+                if (pre.querySelector(".copy-code-btn")) return;
+                const codeEl = pre.querySelector("code") || pre;
+
+                const btn = document.createElement("button");
+                btn.className = "copy-code-btn";
+                btn.innerHTML = '<span class="material-symbols-outlined">content_copy</span>Copy';
+                btn.setAttribute("aria-label", "Copy code block to clipboard");
+
+                btn.addEventListener("click", () => {
+                    const textToCopy = codeEl.innerText;
+                    navigator.clipboard.writeText(textToCopy).then(() => {
+                        btn.innerHTML = '<span class="material-symbols-outlined" style="color:#10b981;">check</span>Copied!';
+                        setTimeout(() => {
+                            btn.innerHTML = '<span class="material-symbols-outlined">content_copy</span>Copy';
+                        }, 1500);
+                    }).catch(err => {
+                        console.error("Failed to copy code: ", err);
+                    });
+                });
+
+                pre.appendChild(btn);
+            });
+        }
+
+        // Initialize components
+        document.addEventListener('DOMContentLoaded', () => {
+            formatBeforeAfterBlocks();
+            initCopyButtons();
+            initReveal();
+            initFilters();
+            initMetricsChart();
+            animateScore();
+            initCardAnimations();
+
+            // Set default active ADK node styling
+            const firstNode = document.querySelector('.adk-blueprint-node');
+            if (firstNode) firstNode.classList.add('border-primary', 'bg-primary/5', 'shadow-[0_0_15px_rgba(0,209,255,0.15)]');
+        });
+
+    </script>
+</body>
+
+</html>

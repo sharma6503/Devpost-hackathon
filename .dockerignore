@@ -1,0 +1,35 @@
+# Standard Python/UV ignores
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+uv.lock
+.adk/
+.python-version
+.pytest_cache/
+
+# Docker/System ignores
+.git/
+.gitignore
+.env
+Dockerfile
+.dockerignore
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Local-only / heavy directories that must never ship in the image
+scratch/
+runs/
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+tests/
+docs/
+installation_scripts/
+.claude/
+.agents/
+.antigravitycli/
+*.zip

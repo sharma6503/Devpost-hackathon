@@ -1,0 +1,15 @@
+{
+  "name": "agent-guardian-report-assets",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Offline build of the static assets the HTML audit report inlines (Tailwind CSS). Run `npm install` then `npm run build`. Output is committed under agent_guardian/templates/vendor/.",
+  "scripts": {
+    "build": "tailwindcss -c tailwind.config.js -i input.css -o ../../agent_guardian/templates/vendor/report.css --minify"
+  },
+  "devDependencies": {
+    "@tailwindcss/container-queries": "^0.1.1",
+    "@tailwindcss/forms": "^0.5.7",
+    "@tailwindcss/typography": "^0.5.10",
+    "tailwindcss": "^3.4.0"
+  }
+}

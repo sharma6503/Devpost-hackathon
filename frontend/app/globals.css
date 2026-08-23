@@ -1,0 +1,301 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap');
+@import "./design-spells.css";
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+@custom-variant light (&:where(.light, .light *));
+
+/* ─── Base Theme Variables (Dark default, Light override) ─────────────────────── */
+:root, [data-theme="dark"], .dark {
+  --color-canvas: #212121;
+  --color-sidebar: #171717;
+  --color-surface: #2F2F2F;
+  --color-surface-elevated: #383838;
+  --color-surface-subtle: #1E1E1E;
+  --color-input: #2F2F2F;
+  --color-border: rgba(255, 255, 255, 0.12);
+  --color-border-subtle: rgba(255, 255, 255, 0.08);
+  --color-border-hover: rgba(255, 255, 255, 0.22);
+  --color-hover: rgba(255, 255, 255, 0.08);
+  
+  --color-text-primary: #ECECF1;
+  --color-text-secondary: #B4B4B4;
+  --color-text-muted: #8E8EA0;
+
+  --color-user-bubble: #2F2F2F;
+  --color-user-bubble-border: rgba(255, 255, 255, 0.1);
+  --color-user-bubble-text: #ECECF1;
+
+  --color-header-bg: rgba(33, 33, 33, 0.88);
+  --color-card-bg: #2F2F2F;
+  --color-card-border: rgba(255, 255, 255, 0.1);
+  --color-modal-bg: #212121;
+  --color-drawer-bg: #171717;
+  --color-drawer-header: #1E1E1E;
+  --color-trace-bar-bg: #1A1A1A;
+  --color-code-bg: #171717;
+  --color-code-border: rgba(255, 255, 255, 0.1);
+
+  --color-scrollbar-thumb: rgba(255, 255, 255, 0.18);
+  --color-scrollbar-thumb-hover: rgba(255, 255, 255, 0.32);
+}
+
+[data-theme="light"], .light {
+  --color-canvas: #FFFFFF;
+  --color-sidebar: #F9F9F9;
+  --color-surface: #F4F4F4;
+  --color-surface-elevated: #FFFFFF;
+  --color-surface-subtle: #EFEFEF;
+  --color-input: #F4F4F4;
+  --color-border: rgba(0, 0, 0, 0.1);
+  --color-border-subtle: rgba(0, 0, 0, 0.06);
+  --color-border-hover: rgba(0, 0, 0, 0.2);
+  --color-hover: rgba(0, 0, 0, 0.05);
+
+  --color-text-primary: #0D0D0D;
+  --color-text-secondary: #4A4A4A;
+  --color-text-muted: #737373;
+
+  --color-user-bubble: #F4F4F4;
+  --color-user-bubble-border: rgba(0, 0, 0, 0.08);
+  --color-user-bubble-text: #0D0D0D;
+
+  --color-header-bg: rgba(255, 255, 255, 0.92);
+  --color-card-bg: #FFFFFF;
+  --color-card-border: rgba(0, 0, 0, 0.08);
+  --color-modal-bg: #FFFFFF;
+  --color-drawer-bg: #FAFAFA;
+  --color-drawer-header: #F0F0F0;
+  --color-trace-bar-bg: #F4F4F4;
+  --color-code-bg: #F6F8FA;
+  --color-code-border: rgba(0, 0, 0, 0.08);
+
+  --color-scrollbar-thumb: rgba(0, 0, 0, 0.2);
+  --color-scrollbar-thumb-hover: rgba(0, 0, 0, 0.35);
+}
+
+/* ─── Theme tokens — Agent Guardian Workspace & Design Tokens ────── */
+@theme {
+  /* Fonts */
+  --font-sans:                     var(--font-inter), 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-display:                  var(--font-inter), 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-headline:                 var(--font-inter), 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono:                     var(--font-mono), 'JetBrains Mono', 'SFMono-Regular', Menlo, Monaco, Consolas, monospace;
+
+  /* Brand Canonical Colors (From Figma Logo: Cobalt #2525A3 & Deep Navy #0E1F3D) */
+  --color-guardian-canvas:         var(--color-canvas);
+  --color-guardian-sidebar:        var(--color-sidebar);
+  --color-guardian-surface:        var(--color-surface);
+  --color-guardian-surface-high:   var(--color-surface-elevated);
+  --color-guardian-surface-low:    var(--color-surface-subtle);
+  --color-guardian-input:          var(--color-input);
+  --color-guardian-border:         var(--color-border);
+  --color-guardian-border-light:   var(--color-border-subtle);
+  --color-guardian-hover:          var(--color-hover);
+  --color-guardian-cobalt:         #2525A3;
+  --color-guardian-cobalt-light:   #3B3BE8;
+  --color-guardian-cobalt-glow:    rgba(37, 37, 163, 0.28);
+  --color-guardian-text-primary:   var(--color-text-primary);
+  --color-guardian-text-secondary: var(--color-text-secondary);
+  --color-guardian-text-muted:     var(--color-text-muted);
+
+  /* Backward-compatible aliases */
+  --color-chatgpt-canvas:          var(--color-canvas);
+  --color-chatgpt-sidebar:         var(--color-sidebar);
+  --color-chatgpt-surface:         var(--color-surface);
+  --color-chatgpt-surface-high:    var(--color-surface-elevated);
+  --color-chatgpt-surface-low:     var(--color-surface-subtle);
+  --color-chatgpt-input:           var(--color-input);
+  --color-chatgpt-border:          var(--color-border);
+  --color-chatgpt-border-light:    var(--color-border-subtle);
+  --color-chatgpt-hover:           var(--color-hover);
+  --color-chatgpt-emerald:         #2525A3;
+  --color-chatgpt-emerald-light:   #3B3BE8;
+  --color-chatgpt-emerald-glow:    rgba(37, 37, 163, 0.28);
+  --color-chatgpt-text-primary:    var(--color-text-primary);
+  --color-chatgpt-text-secondary:  var(--color-text-secondary);
+  --color-chatgpt-text-muted:      var(--color-text-muted);
+
+  /* Primary (Agent Guardian Brand Indigo & White Accents) */
+  --color-primary:                 #2525A3;
+  --color-on-primary:              #FFFFFF;
+  --color-primary-container:       #0E1F3D;
+  --color-on-primary-container:    #EEF2FF;
+  --color-inverse-primary:         #3B3BE8;
+  --color-primary-fixed:           #EEF2FF;
+  --color-primary-fixed-dim:       #2525A3;
+  --color-on-primary-fixed:        #0E1F3D;
+  --color-on-primary-fixed-variant: #1E1B4B;
+
+  /* Secondary (Amber / Warning) */
+  --color-secondary:               #F59E0B;
+  --color-on-secondary:            #000000;
+  --color-secondary-container:     #78350F;
+  --color-on-secondary-container:  #FEF3C7;
+
+  /* Tertiary (Brand Focus / Nominal) */
+  --color-tertiary:                #2525A3;
+  --color-on-tertiary:             #FFFFFF;
+  --color-tertiary-container:      #0E1F3D;
+  --color-on-tertiary-container:   #A6C3EE;
+
+  /* Error / Critical */
+  --color-error:                   #EF4444;
+  --color-on-error:                #FFFFFF;
+  --color-error-container:         #7F1D1D;
+  --color-on-error-container:      #FEE2E2;
+
+  /* Status Colors */
+  --color-brand-700:               #0E1F3D;
+  --color-brand-500:               #2525A3;
+  --color-brand-100:               #2F2F2F;
+  --color-brand-50:                #212121;
+  --color-success:                 #2525A3;
+  --color-warning:                 #F59E0B;
+  --color-sev-critical:            #EF4444;
+  --color-sev-low:                 #8E8EA0;
+  --color-expert-adk:              #2525A3;
+  --color-expert-adk-bg:           #0E1F3D;
+  --color-code-bg:                 var(--color-code-bg);
+
+  /* Per-agent theme tokens (ChatGPT Clean Badges) */
+  --color-agent-blue-bg:           rgba(59, 130, 246, 0.12);
+  --color-agent-blue-border:       rgba(59, 130, 246, 0.35);
+  --color-agent-blue-text:         #60A5FA;
+  --color-agent-blue-icon:         #3B82F6;
+
+  --color-agent-purple-bg:         rgba(37, 37, 163, 0.12);
+  --color-agent-purple-border:     rgba(37, 37, 163, 0.35);
+  --color-agent-purple-text:       #A6C3EE;
+  --color-agent-purple-icon:       #2525A3;
+
+  --color-agent-green-bg:          rgba(37, 37, 163, 0.12);
+  --color-agent-green-border:      rgba(37, 37, 163, 0.35);
+  --color-agent-green-text:        #A6C3EE;
+  --color-agent-green-icon:        #2525A3;
+
+  --color-agent-red-bg:            rgba(239, 68, 68, 0.12);
+  --color-agent-red-border:        rgba(239, 68, 68, 0.35);
+  --color-agent-red-text:          #F87171;
+  --color-agent-red-icon:          #EF4444;
+
+  --color-agent-amber-bg:          rgba(245, 158, 11, 0.12);
+  --color-agent-amber-border:      rgba(245, 158, 11, 0.35);
+  --color-agent-amber-text:        #FBBF24;
+  --color-agent-amber-icon:        #F59E0B;
+
+  --color-agent-slate-bg:          rgba(142, 142, 160, 0.12);
+  --color-agent-slate-border:      rgba(142, 142, 160, 0.35);
+  --color-agent-slate-text:        #ECECF1;
+  --color-agent-slate-icon:        #8E8EA0;
+
+  --color-agent-cyan-bg:           rgba(6, 182, 212, 0.12);
+  --color-agent-cyan-border:       rgba(6, 182, 212, 0.35);
+  --color-agent-cyan-text:         #22D3EE;
+  --color-agent-cyan-icon:         #06B6D4;
+
+  --color-agent-gray-bg:           rgba(115, 115, 115, 0.12);
+  --color-agent-gray-border:       rgba(115, 115, 115, 0.35);
+  --color-agent-gray-text:         #D4D4D4;
+  --color-agent-gray-icon:         #A3A3A3;
+
+  --color-agent-violet-bg:         rgba(139, 92, 246, 0.12);
+  --color-agent-violet-border:     rgba(139, 92, 246, 0.35);
+  --color-agent-violet-text:       #A78BFA;
+  --color-agent-violet-icon:       #8B5CF6;
+
+  --color-agent-fuchsia-bg:        rgba(217, 70, 239, 0.12);
+  --color-agent-fuchsia-border:    rgba(217, 70, 239, 0.35);
+  --color-agent-fuchsia-text:      #E879F9;
+  --color-agent-fuchsia-icon:      #D946EF;
+
+  --color-agent-emerald-bg:        rgba(37, 37, 163, 0.12);
+  --color-agent-emerald-border:    rgba(37, 37, 163, 0.35);
+  --color-agent-emerald-text:      #A6C3EE;
+  --color-agent-emerald-icon:      #2525A3;
+
+  --color-agent-rose-bg:           rgba(244, 63, 94, 0.12);
+  --color-agent-rose-border:       rgba(244, 63, 94, 0.35);
+  --color-agent-rose-text:         #FB7185;
+  --color-agent-rose-icon:         #F43F5E;
+
+  --color-agent-forest-bg:         rgba(34, 197, 94, 0.12);
+  --color-agent-forest-border:     rgba(34, 197, 94, 0.35);
+  --color-agent-forest-text:       #4ADE80;
+  --color-agent-forest-icon:       #22C55E;
+}
+
+/* Base Body Styles */
+body {
+  background-color: var(--color-canvas);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01" 1, "cv01" 1, "cv02" 1, "cv03" 1, "cv04" 1, "cv11" 1;
+  letter-spacing: -0.011em;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom Scrollbars (Adaptive for Light & Dark mode) */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-scrollbar-thumb);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-scrollbar-thumb-hover);
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--color-scrollbar-thumb);
+  border-radius: 9999px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--color-scrollbar-thumb-hover);
+}
+
+/* ChatGPT Glow Utilities */
+.glow-emerald,
+.glow-cobalt {
+  box-shadow: 0 0 20px rgba(37, 37, 163, 0.28);
+}
+.glow-white {
+  box-shadow: 0 0 20px rgba(255, 255, 255, 0.15);
+}
+
+/* Smooth Fade and Scale Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes pulseSubtle {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+.animate-scale-in {
+  animation: scaleIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+.animate-pulse-subtle {
+  animation: pulseSubtle 2s infinite ease-in-out;
+}
