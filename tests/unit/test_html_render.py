@@ -94,3 +94,36 @@ def test_expert_section_no_warning_when_populated(caplog):
     ]
     assert len(agent_guardian_warnings) == 0
     assert "Looks good" in html
+
+
+def test_agent_guardian_logo_rendered_in_html_report():
+    import os
+
+    template_path = os.path.join(
+        os.path.dirname(__file__),
+        "..",
+        "..",
+        "agent_guardian",
+        "templates",
+        "report_template.html",
+    )
+    with open(template_path, "r", encoding="utf-8") as f:
+        template = f.read()
+
+    logo_data_uri = "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4="
+    adk_data_uri = "data:image/png;base64,iVBORw0KGgo="
+
+    out = _render_report_template(
+        template,
+        {
+            "LOGO": logo_data_uri,
+            "ADK_ICON": adk_data_uri,
+            "TITLE": "Agent Guardian Verification",
+            "DATE": "2026-08-24",
+        },
+    )
+
+    assert logo_data_uri in out
+    assert adk_data_uri in out
+    assert 'alt="Agent Guardian Logo"' in out
+    assert 'alt="ADK"' in out

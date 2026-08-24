@@ -509,17 +509,24 @@ async def save_html_report_callback(callback_context: CallbackContext):
         callback_context.state["html_report_content"] = f"Report generation failed: {str(e)}"
         return
 
-    def _img(n):
+    def _img(n: str) -> str:
         try:
-            with open(
+            candidates = [
                 os.path.join(os.path.dirname(__file__), "..", "templates", "image", n),
-                "rb",
-            ) as f:
-                return f"data:image/png;base64,{base64.b64encode(f.read()).decode('utf-8')}"
+                os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "public", n),
+            ]
+            for p in candidates:
+                if os.path.exists(p):
+                    with open(p, "rb") as f:
+                        data = base64.b64encode(f.read()).decode("utf-8")
+                        mime = "image/svg+xml" if n.endswith(".svg") else "image/png"
+                        return f"data:{mime};base64,{data}"
         except Exception:
             return ""
+        return ""
 
-    l_src, a_src = "", _img("google-adk.png")
+    l_src = _img("agent-guardian-logo.svg") or _img("agent-guardian-logo.png")
+    a_src = _img("google-adk.png")
 
     status_badge = render_status_pill(_gate_label, _gate_color, _gate_icon, size="13px")
 

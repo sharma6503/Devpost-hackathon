@@ -164,12 +164,39 @@ pre_review_reset_node = FunctionNode(name="pre_review_reset_node", func=_pre_rev
 async def _merge_local_skills_callback(ctx) -> None:
     """Merges GCP Skill Registry standards with the retrieved Confluence rules."""
     try:
-        from agent_guardian.utils.skill_loader import get_merged_ruleset
+        from agent_guardian.utils.skill_loader import fetch_configured_gcp_skills, get_merged_ruleset
 
         confluence_rules = ctx.state.get("confluence_rules", "")
-        merged_rules = await get_merged_ruleset(confluence_rules)
+        configured_skills = ctx.state.get("gcp_skills") or ctx.state.get("skills") or ctx.state.get("skill_names")
+        if isinstance(configured_skills, str):
+            configured_skills = [s.strip() for s in configured_skills.split(",") if s.strip()]
+
+        search_queries = ctx.state.get("skill_search_queries")
+        if isinstance(search_queries, str):
+            search_queries = [search_queries]
+
+        skills = await fetch_configured_gcp_skills(
+            skill_names=configured_skills,
+            search_queries=search_queries,
+        )
+
+        merged_rules = await get_merged_ruleset(
+            confluence_rules=confluence_rules,
+            skills=skills,
+        )
         ctx.state["confluence_rules"] = merged_rules
-        logger.info("[merge_local_skills_node] Successfully integrated GCP skills into confluence_rules.")
+
+        # Persist retrieved skills metadata in state for downstream tracking and reporting
+        retrieved_meta = [
+            {"name": s.name, "description": getattr(s, "description", "") or getattr(getattr(s, "frontmatter", None), "description", "")}
+            for s in skills
+        ]
+        ctx.state["retrieved_gcp_skills"] = retrieved_meta
+        logger.info(
+            "[merge_local_skills_node] Successfully integrated %d GCP skill(s) into confluence_rules: %s",
+            len(skills),
+            [s.name for s in skills],
+        )
     except Exception as e:
         logger.error(f"[merge_local_skills_node] Failed to merge GCP skills (continuing): {e}")
 

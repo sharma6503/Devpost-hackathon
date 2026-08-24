@@ -2,17 +2,34 @@ from __future__ import annotations
 import os
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
-from google.adk.skills.models import Skill
+from google.adk.skills.models import Skill, Frontmatter
 from google.adk.tools.skill_toolset import SkillToolset
 from agent_guardian.utils.skill_loader import (
+    normalize_skill_name,
     get_configured_skill_names,
     get_gcp_skill_registry,
+    fetch_skill_by_name,
+    search_gcp_skills,
+    search_and_fetch_gcp_skills,
     fetch_configured_gcp_skills,
     compile_skills_to_markdown,
     get_merged_ruleset,
     get_skill_toolset,
     invalidate_skill_toolsets,
 )
+
+
+def test_normalize_skill_name():
+    """Verify skill name normalization and sanitization across various formats."""
+    assert normalize_skill_name("") == ""
+    assert normalize_skill_name("  governance-audit  ") == "governance-audit"
+    assert normalize_skill_name("'security-scan'") == "security-scan"
+    assert normalize_skill_name('"cloud-run"') == "cloud-run"
+    assert normalize_skill_name("projects/test-proj/locations/us-central1/skills/cloud-sql") == "cloud-sql"
+    assert normalize_skill_name("skills/my-custom-skill/SKILL.md") == "my-custom-skill"
+    assert normalize_skill_name("skills/my-custom-skill/skill.md") == "my-custom-skill"
+    assert normalize_skill_name("My Custom Skill") == "my-custom-skill"
+    assert normalize_skill_name("test_skill_name") == "test-skill-name"
 
 
 def test_get_configured_skill_names():
@@ -22,12 +39,12 @@ def test_get_configured_skill_names():
         assert get_configured_skill_names() == []
 
     # Scenario B: GCP_SKILLS with whitespace and multiple entries
-    with patch.dict(os.environ, {"GCP_SKILLS": "governance-audit,  implementation-standards , pilot-to-prod "}, clear=True):
+    with patch.dict(os.environ, {"GCP_SKILLS": "governance-audit,  implementation-standards , 'pilot-to-prod' "}, clear=True):
         names = get_configured_skill_names()
         assert names == ["governance-audit", "implementation-standards", "pilot-to-prod"]
 
-    # Scenario C: SKILLS fallback
-    with patch.dict(os.environ, {"SKILLS": "a2a-compliance-rules, grc-documents"}, clear=True):
+    # Scenario C: SKILLS fallback with full GCP paths
+    with patch.dict(os.environ, {"SKILLS": "projects/123/locations/us-central1/skills/a2a-compliance-rules, grc-documents"}, clear=True):
         names = get_configured_skill_names()
         assert names == ["a2a-compliance-rules", "grc-documents"]
 
@@ -45,6 +62,99 @@ def test_get_gcp_skill_registry():
         assert reg is not None
         assert reg.project_id == "test-project"
         assert reg.location == "global"
+
+
+@pytest.mark.asyncio
+async def test_fetch_skill_by_name():
+    """Verify fetch_skill_by_name with remote registry and caching."""
+    invalidate_skill_toolsets()
+
+    mock_skill = MagicMock(spec=Skill)
+    mock_skill.name = "governance-audit"
+    mock_skill.description = "Governance audit rules"
+
+    mock_registry = MagicMock()
+    mock_registry.get_skill = AsyncMock(return_value=mock_skill)
+
+    # Remote fetch success
+    skill = await fetch_skill_by_name("projects/p/locations/l/skills/governance-audit", registry=mock_registry, use_cache=True)
+    assert skill is not None
+    assert skill.name == "governance-audit"
+    mock_registry.get_skill.assert_called_once_with(name="governance-audit")
+
+    # Cache hit
+    skill_cached = await fetch_skill_by_name("governance-audit", registry=mock_registry, use_cache=True)
+    assert skill_cached is mock_skill
+    assert mock_registry.get_skill.call_count == 1  # Not called again
+
+
+@pytest.mark.asyncio
+async def test_search_gcp_skills():
+    """Verify search_gcp_skills queries the registry."""
+    invalidate_skill_toolsets()
+
+    mock_fm1 = MagicMock(spec=Frontmatter)
+    mock_fm1.name = "gcp-cloud-run"
+    mock_fm2 = MagicMock(spec=Frontmatter)
+    mock_fm2.name = "gcp-cloud-sql"
+
+    mock_registry = MagicMock()
+    mock_registry.search_skills = AsyncMock(return_value=[mock_fm1, mock_fm2])
+
+    results = await search_gcp_skills("cloud", registry=mock_registry)
+    assert len(results) == 2
+    assert results[0].name == "gcp-cloud-run"
+    mock_registry.search_skills.assert_called_once_with(query="cloud")
+
+    # Empty query returns empty list immediately
+    empty_results = await search_gcp_skills("", registry=mock_registry)
+    assert empty_results == []
+
+
+@pytest.mark.asyncio
+async def test_search_and_fetch_gcp_skills():
+    """Verify search_and_fetch_gcp_skills retrieves full Skill objects for search results."""
+    invalidate_skill_toolsets()
+
+    mock_fm = MagicMock(spec=Frontmatter)
+    mock_fm.name = "gcp-storage"
+
+    mock_skill = MagicMock(spec=Skill)
+    mock_skill.name = "gcp-storage"
+    mock_skill.description = "Google Cloud Storage Skill"
+
+    mock_registry = MagicMock()
+    mock_registry.search_skills = AsyncMock(return_value=[mock_fm])
+    mock_registry.get_skill = AsyncMock(return_value=mock_skill)
+
+    skills = await search_and_fetch_gcp_skills("storage", registry=mock_registry, limit=5)
+    assert len(skills) == 1
+    assert skills[0].name == "gcp-storage"
+
+
+@pytest.mark.asyncio
+async def test_fetch_configured_gcp_skills_with_search_queries():
+    """Verify dynamic discovery via search_queries in fetch_configured_gcp_skills."""
+    invalidate_skill_toolsets()
+
+    mock_fm = MagicMock(spec=Frontmatter)
+    mock_fm.name = "discovered-skill"
+
+    mock_skill = MagicMock(spec=Skill)
+    mock_skill.name = "discovered-skill"
+    mock_skill.description = "Discovered Skill"
+
+    mock_registry = MagicMock()
+    mock_registry.search_skills = AsyncMock(return_value=[mock_fm])
+    mock_registry.get_skill = AsyncMock(return_value=mock_skill)
+
+    with patch.dict(os.environ, {}, clear=True):
+        skills = await fetch_configured_gcp_skills(
+            skill_names=None,
+            registry=mock_registry,
+            search_queries=["governance"],
+        )
+        assert any(s.name == "discovered-skill" for s in skills)
 
 
 @pytest.mark.asyncio
@@ -87,8 +197,8 @@ async def test_fetch_configured_gcp_skills_missing_or_error():
     assert skills == []
 
 
-def test_compile_skills_to_markdown():
-    """Verify compilation of GCP Skill objects into structured markdown rules."""
+def test_compile_skills_to_markdown_with_bytes_and_assets():
+    """Verify compilation of GCP Skill objects into structured markdown rules with byte references and assets."""
     mock_frontmatter_1 = MagicMock()
     mock_frontmatter_1.name = "skill-one"
     mock_frontmatter_1.description = "First test skill"
@@ -99,7 +209,8 @@ def test_compile_skills_to_markdown():
     skill_1.frontmatter = mock_frontmatter_1
     skill_1.instructions = "Rule #1: Be fast."
     mock_res_1 = MagicMock()
-    mock_res_1.references = {"rules.md": "The fast rules manifest."}
+    mock_res_1.references = {"rules.md": b"The fast rules manifest from bytes."}
+    mock_res_1.assets = {"schema.json": b"{}"}
     skill_1.resources = mock_res_1
 
     skill_2 = MagicMock(spec=Skill)
@@ -108,6 +219,7 @@ def test_compile_skills_to_markdown():
     skill_2.instructions = "Rule #2: Be precise."
     mock_res_2 = MagicMock()
     mock_res_2.references = {}
+    mock_res_2.assets = {}
     skill_2.resources = mock_res_2
 
     markdown = compile_skills_to_markdown([skill_1, skill_2])
@@ -117,7 +229,9 @@ def test_compile_skills_to_markdown():
     assert "**Description**: First test skill" in markdown
     assert "Rule #1: Be fast." in markdown
     assert "#### Reference File: `references/rules.md`" in markdown
-    assert "The fast rules manifest." in markdown
+    assert "The fast rules manifest from bytes." in markdown
+    assert "**Available Assets**:" in markdown
+    assert "- `assets/schema.json`" in markdown
 
     assert "### Skill: skill-two" in markdown
     assert "**Description**: Second test skill" in markdown
@@ -150,6 +264,7 @@ async def test_get_merged_ruleset_success():
     mock_skill.instructions = "GCP Audit instructions"
     mock_res_3 = MagicMock()
     mock_res_3.references = {}
+    mock_res_3.assets = {}
     mock_skill.resources = mock_res_3
 
     # Scenario A: Confluence rules are available
@@ -175,6 +290,7 @@ def test_get_skill_toolset():
     mock_skill.instructions = "Instructions"
     mock_skill.resources = MagicMock()
     mock_skill.resources.references = {}
+    mock_skill.resources.assets = {}
 
     with patch("agent_guardian.utils.skill_loader.get_gcp_skill_registry", return_value=None):
         toolset = get_skill_toolset(skills=[mock_skill], use_registry=False, use_cache=False)
@@ -239,4 +355,36 @@ async def test_fetch_configured_gcp_skills_with_local_fallback(tmp_path):
         )
         assert len(skills) == 1
         assert skills[0].name == "offline-skill"
+
+
+@pytest.mark.asyncio
+async def test_merge_local_skills_workflow_callback():
+    """Verify _merge_local_skills_callback in review.py properly stores retrieved_gcp_skills."""
+    from agent_guardian.workflows.review import _merge_local_skills_callback
+
+    mock_skill = MagicMock(spec=Skill)
+    mock_skill.name = "workflow-skill"
+    mock_skill.description = "Workflow skill description"
+    mock_skill.instructions = "Instructions for workflow"
+    mock_res = MagicMock()
+    mock_res.references = {}
+    mock_res.assets = {}
+    mock_skill.resources = mock_res
+
+    mock_ctx = MagicMock()
+    mock_ctx.state = {
+        "confluence_rules": "Corporate Policy",
+        "gcp_skills": "workflow-skill",
+    }
+
+    with patch("agent_guardian.utils.skill_loader.fetch_configured_gcp_skills", new_callable=AsyncMock) as mock_fetch:
+        mock_fetch.return_value = [mock_skill]
+        await _merge_local_skills_callback(mock_ctx)
+
+        assert "Corporate Policy" in mock_ctx.state["confluence_rules"]
+        assert "### Skill: workflow-skill" in mock_ctx.state["confluence_rules"]
+        assert mock_ctx.state["retrieved_gcp_skills"] == [
+            {"name": "workflow-skill", "description": "Workflow skill description"}
+        ]
+
 

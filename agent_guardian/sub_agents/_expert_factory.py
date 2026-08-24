@@ -28,24 +28,25 @@ from ..utils.tool_guards import block_github_misuse
 
 _cfg = Config()
 
-# Base toolset shared by every standard expert agent.
-_BASE_TOOLS: List[Any] = [
-    parse_uploaded_files,
-    read_artifact_file,
-    github_get_file_contents,
-    github_list_directory_contents,
-    github_get_multiple_files,
-    github_list_multiple_directories,
-    github_get_recursive_tree,
-]
+def get_base_tools() -> List[Any]:
+    """Assemble the base toolset for review experts, resolving fresh toolsets."""
+    tools: List[Any] = [
+        parse_uploaded_files,
+        read_artifact_file,
+        github_get_file_contents,
+        github_list_directory_contents,
+        github_get_multiple_files,
+        github_list_multiple_directories,
+        github_get_recursive_tree,
+    ]
+    github_mcp = get_github_mcp_toolset()
+    if github_mcp is not None:
+        tools.append(github_mcp)
 
-_github_mcp = get_github_mcp_toolset()
-if _github_mcp is not None:
-    _BASE_TOOLS.append(_github_mcp)
-
-_skill_toolset = get_skill_toolset()
-if _skill_toolset is not None:
-    _BASE_TOOLS.append(_skill_toolset)
+    skill_ts = get_skill_toolset()
+    if skill_ts is not None:
+        tools.append(skill_ts)
+    return tools
 
 
 def make_expert_agent(
@@ -72,11 +73,7 @@ def make_expert_agent(
         before_agent_callback: Optional pre-flight hook.
         after_agent_callback: Optional post-run hook.
     """
-    base_tools = list(_BASE_TOOLS)
-    skill_ts = get_skill_toolset()
-    if skill_ts is not None and skill_ts not in base_tools:
-        base_tools.append(skill_ts)
-
+    base_tools = get_base_tools()
     tools = list(extra_tools or []) + base_tools
 
     kwargs: dict[str, Any] = dict(
