@@ -18,7 +18,7 @@ const jetbrainsMono = JetBrains_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "Agent Guardian | Mission Control Security Audit",
+    default: "Agent Guardian",
     template: "%s | Agent Guardian",
   },
   description: "Multi-agent codebase auditing powered by Google ADK. High-precision security, quality, governance and architecture command center.",

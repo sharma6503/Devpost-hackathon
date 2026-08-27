@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:webpack": "next dev --webpack",
+    "clean": "node -e \"const fs=require('fs'); if(fs.existsSync('.next')) fs.rmSync('.next', {recursive:true, force:true}); console.log('Cleaned .next cache');\"",
     "build": "next build",
     "start": "next start"
   },

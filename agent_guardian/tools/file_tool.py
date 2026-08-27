@@ -161,10 +161,54 @@ SKIP_EXTENSIONS = {
     ".safetensors",
 }
 
+# Sensitive credential / key file names and extensions to protect from unintended ingestion
+SENSITIVE_FILENAMES = {
+    ".env",
+    ".env.local",
+    ".env.production",
+    ".env.staging",
+    ".gitconfig",
+    "id_rsa",
+    "id_dsa",
+    "id_ecdsa",
+    "id_ed25519",
+    "credentials.json",
+    "service_account.json",
+    "service-account.json",
+    "service_account_key.json",
+    "authorized_keys",
+    "known_hosts",
+    "passwd",
+    "shadow",
+    "master.key",
+    "secrets.yml",
+    "secrets.yaml",
+}
+
+SENSITIVE_EXTENSIONS = {
+    ".pem",
+    ".key",
+    ".pkcs12",
+    ".p12",
+    ".pfx",
+    ".kdbx",
+    ".keystore",
+    ".jks",
+}
+
 
 def is_ingestible_file(name: str) -> bool:
-    """Denylist filter: ingest any file that is not a known binary/media type."""
-    return Path(name).suffix.lower() not in SKIP_EXTENSIONS
+    """Denylist filter: ingest any file that is not a known binary/media or sensitive credential type."""
+    p = Path(name)
+    base = p.name.lower()
+    suffix = p.suffix.lower()
+    if suffix in SKIP_EXTENSIONS or suffix in SENSITIVE_EXTENSIONS:
+        return False
+    if base in SENSITIVE_FILENAMES and base != ".env.example":
+        return False
+    if base.startswith(".env.") and not base.endswith(".example"):
+        return False
+    return True
 
 
 def in_skipped_dir(parts) -> bool:
@@ -271,25 +315,35 @@ def parse_uploaded_files(file_paths: list[str], tool_context: ToolContext = None
                         # attribute — the id lives on `tool_context.session.id`.
                         session_id = None
                         if tool_context is not None:
-                            session_id = getattr(tool_context, "session_id", None) or getattr(
-                                getattr(tool_context, "session", None), "id", None
-                            )
+                            raw_sid = getattr(tool_context, "session_id", None)
+                            if isinstance(raw_sid, (str, int)) and str(raw_sid).strip():
+                                session_id = str(raw_sid).strip()
+                            else:
+                                session_obj = getattr(tool_context, "session", None)
+                                raw_sid = getattr(session_obj, "id", None)
+                                if isinstance(raw_sid, (str, int)) and str(raw_sid).strip():
+                                    session_id = str(raw_sid).strip()
                         if session_id:
-                            artifact_dir = Path.cwd() / ".adk" / "artifacts" / str(session_id) / "source"
-                            # Clean stale files from a PRIOR upload turn before extracting the
-                            # first ZIP of this call; otherwise deleted/renamed files linger on
-                            # disk and can be resolved by _resolve_path. Wipe only once per call
-                            # (guarded by artifact_cleaned) so multiple ZIPs passed in one call
-                            # merge into the same dir instead of each wiping the previous one's.
-                            if artifact_dir.exists() and not artifact_cleaned:
-                                try:
-                                    shutil.rmtree(artifact_dir)
-                                except Exception as _clean_err:
-                                    logger.warning(f"parse_uploaded_files: could not clean artifact dir: {_clean_err}")
-                            artifact_cleaned = True
-                            artifact_dir.mkdir(parents=True, exist_ok=True)
-                            _unzip_to_target(path, artifact_dir, skipped)
-                            tool_context.state["source_artifact_path"] = str(artifact_dir.absolute())
+                            import re as _re
+                            clean_sid = _re.sub(r"[^a-zA-Z0-9_-]", "", str(session_id))
+                            if clean_sid:
+                                base_artifacts = (Path.cwd() / ".adk" / "artifacts").resolve()
+                                artifact_dir = (base_artifacts / clean_sid / "source").resolve()
+                                if artifact_dir.is_relative_to(base_artifacts):
+                                    # Clean stale files from a PRIOR upload turn before extracting the
+                                    # first ZIP of this call; otherwise deleted/renamed files linger on
+                                    # disk and can be resolved by _resolve_path. Wipe only once per call
+                                    # (guarded by artifact_cleaned) so multiple ZIPs passed in one call
+                                    # merge into the same dir instead of each wiping the previous one's.
+                                    if artifact_dir.exists() and not artifact_cleaned:
+                                        try:
+                                            shutil.rmtree(artifact_dir)
+                                        except Exception as _clean_err:
+                                            logger.warning(f"parse_uploaded_files: could not clean artifact dir: {_clean_err}")
+                                    artifact_cleaned = True
+                                    artifact_dir.mkdir(parents=True, exist_ok=True)
+                                    _unzip_to_target(path, artifact_dir, skipped)
+                                    tool_context.state["source_artifact_path"] = str(artifact_dir.absolute())
 
                         for info in infolist:
                             name = info.filename
@@ -433,7 +487,14 @@ def _gather_paths(root: Path, task_list: list, skipped: list, single_file=False)
 
 def _read_file_safe(path: Path) -> str:
     try:
-        raw = path.read_text(encoding="utf-8", errors="replace")
+        if path.is_symlink():
+            logger.debug(f"Skipping symlink {path}")
+            return ""
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            raw = f.read(MAX_FILE_SIZE_BYTES + 1)
+        if len(raw) > MAX_FILE_SIZE_BYTES:
+            logger.debug(f"Skipping {path}: exceeds {MAX_FILE_SIZE_BYTES} byte limit")
+            return ""
         if path.suffix.lower() == ".ipynb":
             return _preprocess_ipynb(raw)
         return raw
@@ -461,12 +522,16 @@ def _read_zip_member_safe(zip_path: Path, member_name: str) -> str:
 
 
 def _unzip_to_target(zip_path: Path, target_dir: Path, skipped: list):
-    """Physically extracts eligible code files from a ZIP archive to a given target directory in parallel."""
+    """Physically extracts eligible code files from a ZIP archive to a given target directory with strict symlink and bomb guards."""
     try:
+        import stat
+        max_total_bytes = _cfg.max_total_zip_size_kb * 1024
+        resolved_dir = target_dir.resolve()
+
         with zipfile.ZipFile(zip_path, "r") as zf:
             extract_tasks = []
             for name in zf.namelist():
-                if name.endswith("/"):
+                if name.endswith("/") or name.endswith("\\"):
                     continue
 
                 parts = Path(name).parts
@@ -477,6 +542,12 @@ def _unzip_to_target(zip_path: Path, target_dir: Path, skipped: list):
                     continue
 
                 info = zf.getinfo(name)
+                # Ignore symlinks / hardlinks to prevent symlink traversal attacks
+                mode = info.external_attr >> 16
+                if stat.S_ISLNK(mode):
+                    skipped.append(f"{name}: Ignored symlink archive member")
+                    continue
+
                 if info.file_size > MAX_FILE_SIZE_BYTES:
                     skipped.append(f"{name}: too large to extract to physical artifact")
                     continue
@@ -485,18 +556,34 @@ def _unzip_to_target(zip_path: Path, target_dir: Path, skipped: list):
 
             def _extract_member(member_name):
                 try:
-                    resolved_dir = target_dir.resolve()
-                    resolved_target = (target_dir / member_name).resolve()
+                    clean_name = member_name.lstrip("/\\")
+                    resolved_target = (target_dir / clean_name).resolve()
                     if not resolved_target.is_relative_to(resolved_dir):
                         return f"{member_name}: Security error (directory traversal)"
 
-                    target_path = resolved_target
-                    target_path.parent.mkdir(parents=True, exist_ok=True)
+                    target_parent = resolved_target.parent
+                    if target_parent.is_symlink() or not target_parent.resolve().is_relative_to(resolved_dir):
+                        return f"{member_name}: Security error (parent is symlink)"
+
+                    target_parent.mkdir(parents=True, exist_ok=True)
+
+                    if resolved_target.is_symlink():
+                        return f"{member_name}: Security error (target is existing symlink)"
+
                     # Open a fresh handle for the thread to prevent ZipFile concurrency locks
+                    # Bounded chunk copy to prevent decompression bomb
+                    member_bytes = 0
                     with zipfile.ZipFile(zip_path, "r") as thread_zf:
                         with thread_zf.open(member_name) as source_file:
-                            with open(target_path, "wb") as output_file:
-                                shutil.copyfileobj(source_file, output_file)
+                            with open(resolved_target, "wb") as output_file:
+                                while True:
+                                    chunk = source_file.read(65536)
+                                    if not chunk:
+                                        break
+                                    member_bytes += len(chunk)
+                                    if member_bytes > MAX_FILE_SIZE_BYTES:
+                                        return f"{member_name}: Truncated (decompression exceeded max file size limit)"
+                                    output_file.write(chunk)
                 except Exception as e:
                     return f"{member_name}: error extracting - {str(e)}"
                 return None

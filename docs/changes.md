@@ -1,10 +1,67 @@
-# Changes — Observability Fix + Targeted Decoupling
-
-Date: 2026-07-30
-
-Two goals, both scoped tight: fix Datadog observability, and apply high-value decoupling.
+# Architecture, Security & Observability Changelog
 
 ---
+
+## 2026-08-27 — Production File Handling & Security Hardening Audit
+
+### 1. Ingestion File Filtering & Sensitive Credential Protection
+- **Added Credential & Key Denylist (`agent_guardian/tools/file_tool.py`)**: Enhanced `is_ingestible_file()` with `SENSITIVE_FILENAMES` and `SENSITIVE_EXTENSIONS`. Explicitly denies ingestion of secret files (`.env`, `.gitconfig`, `id_rsa`, `id_dsa`, `id_ecdsa`, `id_ed25519`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.crt`, `*.keystore`, `*.jks`, `service_account*.json`, OS credentials), preventing accidental exfiltration into LLM context while allowing benign examples (e.g., `.env.example`).
+- **Sanitized Session Path Traversal**: In `parse_uploaded_files()`, sanitized `session_id` to strictly alphanumeric, dash, and underscore characters (`re.sub(r"[^a-zA-Z0-9_-]", "", ...)`), and enforced that the extraction destination path is strictly contained within `.adk/artifacts`.
+- **Bounded Safe File Reading**: Replaced unbounded `.read()` calls in `_read_file_safe()` with `f.read(MAX_FILE_SIZE_BYTES + 1)` and added `is_symlink()` check to reject symlink redirection.
+
+### 2. ZIP Archive Extraction & Decompression Bomb Hardening
+- **Decompression Bomb & Symlink Guard (`_unzip_to_target`)**:
+  - Validated all zip entries with `is_relative_to(target_dir)` and rejected symbolic link entries (`stat.S_ISLNK(mode)`).
+  - Implemented bounded chunked streaming (64KB chunks up to `MAX_FILE_SIZE_BYTES` per file) to prevent zip-bomb memory exhaustion attacks.
+
+### 3. Artifact Service Security & ZIP Archive Handling
+- **Multi-File & ZIP Artifact Support (`agent_guardian/tools/artifact_tool.py`)**:
+  - Hardened `read_artifact_file()` to support ZIP archive artifacts unpacked in-memory using `zipfile.ZipFile(io.BytesIO(raw_bytes))`, filtering non-code files and decoding safely.
+  - Sanitized filenames via `os.path.basename()` across both `read_artifact_file()` and `save_artifact_file()` to prevent path traversal.
+  - Enforced a 10MB payload ceiling (`MAX_ARTIFACT_PAYLOAD_BYTES = 10 * 1024 * 1024`) on artifact creation in `save_artifact_file()`.
+
+### 4. Static Analysis, Prompt Loader & Interception Guardrails
+- **Bounded Directory Walking (`agent_guardian/tools/static_analysis_tool.py`)**: Enforced a 500KB reading ceiling (`_MAX_FILE_CHARS`) per file in `_walk_source_dir()` and skipped symlinks.
+- **Prompt Path Traversal Prevention (`agent_guardian/prompts.py`)**: Constrained `load_prompt()` to a whitelist of `_PROMPT_NAMES` and verified absolute paths resolve strictly within `templates/`.
+- **Pre-allocation Size Verification (`agent_guardian/utils/callbacks.py`)**: Verified intercepted ZIP payloads conform to `configs.max_total_zip_size_kb` before creating temporary disk files.
+- **Bounded Notebook Parsing (`agent_guardian/utils/ipynb_utils.py`)**: Added character bounds (`max_chars=500_000`) in `preprocess_ipynb_content()` to prevent oversized notebook output generation.
+
+---
+
+## 2026-08-27 — Production Security Audit & Vulnerability Remediation
+
+### 1. Next.js ADK Proxy SSRF & Path Traversal Remediation
+- **Fixed SSRF in ADK Proxy (`frontend/app/api/adk/[...path]/route.ts`)**: Replaced unconstrained parsing of `x-adk-base-url` with `isSafeCustomAdkBase()`. Enforced strict blocking of cloud metadata IP endpoints (`169.254.169.254`, `metadata.google.internal`) and link-local ranges, while requiring explicit host allowlists (`ALLOWED_ADK_HOSTS`) in production.
+- **Enforced Strict Path Traversal Guards**: Constrained `sessionId` resolution in `findCorrectUserIdForSession()` and proxy routes to `/^[a-zA-Z0-9_-]{1,128}$/`, blocking directory traversal (`..`, `%2e`, `\\`).
+
+### 2. FastAPI Gateway Security Hardening & Rate Limiting
+- **Added Security Response Headers Middleware (`api/main.py`)**: Injected defensive HTTP response headers (`X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `X-XSS-Protection: 1; mode=block`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy: camera=(), microphone=(), geolocation=()`, and `Strict-Transport-Security: max-age=31536000; includeSubDomains` for HTTPS/production).
+- **Implemented Login Brute-Force Rate Limiter (`api/main.py`)**: Added sliding-window IP rate limiting (10 attempts per minute) on `/auth/login` to thwart automated credential stuffing and dictionary attacks.
+- **Enhanced Input Validation**: Enforced length boundaries on `LoginRequest` (`username` and `password` max 128 characters).
+
+### 3. Subprocess Execution & Denial-of-Service Defense
+- **Added Subprocess Execution Timeout (`agent_guardian/tools/governance_tools.py`)**: Enforced a strict 15-second timeout and `TimeoutExpired` exception handling on `ast_grep_scan` subprocess invocations to prevent worker thread deadlocks.
+
+---
+
+## 2026-08-27 — Google Cloud Trace Migration & Production Artifact Registry / GCS
+
+### 1. Replaced Datadog with Native Google Cloud Trace (OpenTelemetry)
+- **Purged Datadog Dependencies**: Completely removed all `ddtrace` package dependencies, monkey-patch bootstraps, and Datadog environment variables (`DD_API_KEY`, `DD_SITE`, `DD_LLMOBS_*`, `DD_APM_*`, `DD_SERVICE`, `DD_ENV`, `DD_VERSION`).
+- **Installed OpenTelemetry GCP Exporters**: Added `google-cloud-trace`, `opentelemetry-exporter-gcp-trace`, `opentelemetry-exporter-otlp-proto-http`, and `opentelemetry-resourcedetector-gcp`.
+- **Telemetry Instrumentation Module**: Created [`agent_guardian/utils/tracing.py`](file:///C:/Users/ingsha00/OneDrive%20-%20Ingram%20Micro/Desktop/Devpost-hackathon/Devpost-hackathon-main/agent_guardian/utils/tracing.py) with `setup_cloud_tracing()` and `is_cloud_tracing_enabled()`, using ADK's native `google.adk.telemetry.google_cloud.get_gcp_exporters` and `google.adk.telemetry.setup.maybe_set_otel_providers`.
+- **FastAPI Integration**: Initialized `setup_cloud_tracing()` and passed `otel_to_cloud=is_cloud_tracing_enabled()` into `get_fast_api_app` in [`api/main.py`](file:///C:/Users/ingsha00/OneDrive%20-%20Ingram%20Micro/Desktop/Devpost-hackathon/Devpost-hackathon-main/api/main.py).
+- **Vertex AI Agent Engine Deployment**: Updated [`scripts/deploy_to_agent_engine.py`](file:///C:/Users/ingsha00/OneDrive%20-%20Ingram%20Micro/Desktop/Devpost-hackathon/Devpost-hackathon-main/scripts/deploy_to_agent_engine.py) to enable native ADK telemetry (`enable_tracing=True`) and forward Cloud Trace environment variables.
+
+### 2. Production GCS Artifact Storage & Google Artifact Registry
+- **GCS Artifact Service**: Configured `ARTIFACT_SERVICE_URI=gs://agentguardian-prod-artifacts` and `SESSION_SERVICE_TYPE=vertexai` (`agentengine://`) for fully distributed, cloud-persistent session and artifact storage.
+- **Docker & Google Artifact Registry**: Configured container builds targeting `us-central1-docker.pkg.dev/$GOOGLE_CLOUD_PROJECT/agent-guardian/backend:latest` for deployment to Cloud Run.
+
+---
+
+# Historical Changes — Observability Fix + Targeted Decoupling
+
+Date: 2026-07-30
 
 ## ROOT CAUSE of "no traces" (found by live experiment + Datadog MCP)
 

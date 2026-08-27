@@ -67,8 +67,13 @@ for _singleton in [review_pipeline_agent, followup_agent, remediation_resume_age
 
 from agent_guardian.utils.mcp_factory import get_adk_docs_toolset
 from agent_guardian.utils.skill_loader import get_skill_toolset
+from agent_guardian.tools.gcp_skill_tool import (
+    pull_gcp_skill,
+    list_available_gcp_skills,
+    pull_multiple_gcp_skills,
+)
 
-_root_tools = []
+_root_tools = [pull_gcp_skill, list_available_gcp_skills, pull_multiple_gcp_skills]
 _adk_docs_mcp = get_adk_docs_toolset()
 if _adk_docs_mcp is not None:
     _root_tools.append(_adk_docs_mcp)
@@ -110,9 +115,9 @@ app = App(
     ],
     context_cache_config=_get_cache_config(),
     events_compaction_config=EventsCompactionConfig(
-        token_threshold=32000,
+        token_threshold=120000,
         event_retention_size=4,
-        compaction_interval=5,
+        compaction_interval=10,
         overlap_size=2,
     ),
     resumability_config=ResumabilityConfig(is_resumable=True),

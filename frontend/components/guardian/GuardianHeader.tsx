@@ -2,6 +2,10 @@ import React, { useState, useRef, useEffect } from "react";
 import {
   SlidersHorizontal,
   PanelLeft,
+  PanelLeftClose,
+  PanelTop,
+  PanelTopClose,
+  ChevronUp,
   Sun,
   Moon,
   ShieldCheck,
@@ -12,6 +16,7 @@ import {
   Bot,
   Check,
   Plus,
+  Share2,
 } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import { AgentGuardianLogo } from "@/components/brand/AgentGuardianLogo";
@@ -32,8 +37,10 @@ export const SWARM_MODELS: SwarmModel[] = [
 ];
 
 export interface GuardianHeaderProps {
-  isSidebarOpen: boolean;
-  onToggleSidebar: () => void;
+  isSidebarOpen?: boolean;
+  onToggleSidebar?: () => void;
+  headerVisible?: boolean;
+  onToggleHeader?: () => void;
   activeSessionId?: string;
   activeRepo?: string;
   agentTitle?: string;
@@ -44,6 +51,7 @@ export interface GuardianHeaderProps {
   onSelectModel?: (modelId: string) => void;
   onToggleInspector?: () => void;
   onOpenSearch?: () => void;
+  onOpenShare?: () => void;
   inspectorOpen?: boolean;
   isRunning?: boolean;
 }
@@ -89,6 +97,8 @@ function formatHeaderTarget(target?: string, sessionId?: string): string {
 export function GuardianHeader({
   isSidebarOpen,
   onToggleSidebar,
+  headerVisible = true,
+  onToggleHeader,
   activeSessionId,
   activeRepo,
   agentTitle = "Agent Guardian",
@@ -97,6 +107,7 @@ export function GuardianHeader({
   onSelectApp,
   onToggleInspector,
   onOpenSearch,
+  onOpenShare,
   inspectorOpen,
   isRunning,
 }: GuardianHeaderProps) {
@@ -139,16 +150,16 @@ export function GuardianHeader({
 
   return (
     <header className="sticky top-0 z-30 flex items-center justify-between px-3 md:px-5 py-2.5 bg-white/95 dark:bg-[#212121]/95 backdrop-blur-md border-b border-black/10 dark:border-white/10 select-none transition-colors duration-200">
-      {/* ─── Left: Sidebar Toggle + Brand Identity & App Selector ─── */}
-      <div className="flex items-center gap-2.5 min-w-0 relative" ref={menuRef}>
-        {!isSidebarOpen && (
+      {/* ─── Left: Brand Identity & App Selector ─── */}
+      <div className="flex items-center gap-2 md:gap-2.5 min-w-0 relative" ref={menuRef}>
+        {onToggleSidebar && (
           <button
             onClick={onToggleSidebar}
-            className="p-1.5 rounded-lg text-[#737373] dark:text-[#8E8EA0] hover:text-black dark:hover:text-[#ECECF1] hover:bg-black/5 dark:hover:bg-white/5 transition-colors cursor-pointer shrink-0"
-            title="Open sidebar"
-            aria-label="Open sidebar"
+            className="md:hidden p-1.5 -ml-1 rounded-lg text-[#737373] dark:text-[#8E8EA0] hover:text-black dark:hover:text-[#ECECF1] hover:bg-black/5 dark:hover:bg-white/5 transition-colors cursor-pointer shrink-0"
+            title={isSidebarOpen ? "Close sidebar" : "Open sidebar"}
+            aria-label="Toggle sidebar"
           >
-            <PanelLeft className="h-5 w-5" />
+            <PanelLeft className="h-4 w-4" />
           </button>
         )}
 
@@ -309,6 +320,19 @@ export function GuardianHeader({
           {isDark ? <Sun className="h-4 w-4 text-amber-400" /> : <Moon className="h-4 w-4 text-slate-700" />}
         </button>
 
+        {/* Export & Share Modal Trigger */}
+        {onOpenShare && (
+          <button
+            onClick={onOpenShare}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-black/10 dark:border-white/10 hover:border-black/20 dark:hover:border-white/20 hover:bg-black/5 dark:hover:bg-white/5 text-[#737373] dark:text-[#8E8EA0] hover:text-black dark:hover:text-[#ECECF1] text-xs font-medium transition-all cursor-pointer"
+            title="Export & Share Audit Report"
+            aria-label="Export Audit"
+          >
+            <Share2 className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Export</span>
+          </button>
+        )}
+
         {/* Mission Control Console Toggle */}
         {onToggleInspector && (
           <button
@@ -323,6 +347,18 @@ export function GuardianHeader({
           >
             <SlidersHorizontal className="h-4 w-4" />
             <span className="hidden md:inline">Console</span>
+          </button>
+        )}
+
+        {/* Top-Right Toggle Full Header & Ribbon Section */}
+        {onToggleHeader && (
+          <button
+            onClick={onToggleHeader}
+            className="p-2 rounded-lg border border-black/10 dark:border-white/10 hover:border-black/20 dark:hover:border-white/20 text-[#737373] dark:text-[#8E8EA0] hover:text-black dark:hover:text-[#ECECF1] hover:bg-black/5 dark:hover:bg-white/5 transition-all cursor-pointer shadow-2xs group"
+            title="Hide Header (Alt+H)"
+            aria-label="Hide Header"
+          >
+            <ChevronUp className="h-4 w-4 text-[#737373] dark:text-[#8E8EA0] group-hover:text-black dark:group-hover:text-white transition-colors" />
           </button>
         )}
       </div>

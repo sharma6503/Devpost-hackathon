@@ -191,7 +191,7 @@ def ast_grep_scan(
                 rule_path = rule_tmp.name
             cmd = ["sg", "scan", "--rule", rule_path, "--json", tmp_path]
 
-        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=15)
 
         if result.returncode == 0 and result.stdout.strip():
             matches = json.loads(result.stdout)
@@ -207,6 +207,8 @@ def ast_grep_scan(
         elif result.stderr:
             logger.debug(f"ast-grep stderr: {result.stderr}")
 
+    except subprocess.TimeoutExpired:
+        logger.warning("ast-grep execution timed out after 15 seconds")
     except Exception as e:
         logger.warning(f"ast-grep execution failed: {e}")
     finally:

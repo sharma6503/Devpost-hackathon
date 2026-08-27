@@ -19,9 +19,10 @@ from agent_guardian.auth import BQ_PROJECT, _TABLE_FQN, ensure_users_table, hash
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--username", required=True)
-    parser.add_argument("--department", required=True)
-    parser.add_argument("--country", required=True)
+    parser.add_argument("--username", required=True, help="Username or email for operator")
+    parser.add_argument("--password", required=False, default=None, help="Plaintext password (if omitted, will prompt securely)")
+    parser.add_argument("--department", required=False, default="Security Engineering", help="User department (default: Security Engineering)")
+    parser.add_argument("--country", required=False, default="US", help="User country code (default: US)")
     parser.add_argument("--deactivate", action="store_true", help="Disable this account instead of creating/updating it")
     args = parser.parse_args()
 
@@ -30,6 +31,8 @@ def main() -> None:
 
     if args.deactivate:
         password_hash = None
+    elif args.password is not None:
+        password_hash = hash_password(args.password)
     else:
         password = getpass.getpass("Password: ")
         confirm = getpass.getpass("Confirm password: ")

@@ -13,8 +13,14 @@ import {
   Terminal,
   Cpu,
   PanelLeft,
+  PanelTop,
+  PanelTopClose,
+  ChevronDown,
+  ChevronUp,
+  SlidersHorizontal,
 } from "lucide-react";
 import { GuardianSidebar, type EnrichedSessionItem } from "@/components/guardian/GuardianSidebar";
+import { GuardianHeader } from "@/components/guardian/GuardianHeader";
 import { ChatLogRow } from "@/components/review/ChatLogRow";
 import { UserTraceBar } from "@/components/review/UserTraceBar";
 import { UserConsoleDrawer } from "@/components/console/UserConsoleDrawer";
@@ -35,6 +41,7 @@ import {
   getSessionCache,
   type StoredSession,
 } from "@/lib/session";
+import { REMEDIATION_APPROVE_CMD, REMEDIATION_SKIP_CMD } from "@/lib/remediation";
 import type { LogEntry, Session, AdkEvent, ReviewState } from "@/types/adk";
 
 export interface ADKAgentChatProps {
@@ -87,9 +94,34 @@ export function ADKAgentChat({
     initialSessionId ?? null
   );
 
-  // Sidebar & Inspector Drawer States
+  // Sidebar, Header & Inspector Drawer States
   const [sidebarOpen, setSidebarOpen] = useState(showSidebar);
+  const [headerVisible, setHeaderVisible] = useState(true);
   const [inspectorOpen, setInspectorOpen] = useState(false);
+
+  // Global keydown shortcut for Alt+H
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.altKey && e.key.toLowerCase() === "h") {
+        e.preventDefault();
+        setHeaderVisible((prev) => !prev);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  // Auto-close sidebar on small screens (< 768px)
+  useEffect(() => {
+    const handleResize = () => {
+      if (typeof window !== "undefined" && window.innerWidth < 768) {
+        setSidebarOpen(false);
+      }
+    };
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
   // Prompt Form State
   const [promptInput, setPromptInput] = useState("");
@@ -265,6 +297,19 @@ export function ADKAgentChat({
     }
   };
 
+  // Handle Remediation Approval / Skip
+  const handleRemediationDecision = async (approved: boolean) => {
+    if (!activeSessionId) return;
+    const cmd = approved ? REMEDIATION_APPROVE_CMD : REMEDIATION_SKIP_CMD;
+    await startAgentReview({
+      userId,
+      sessionId: activeSessionId,
+      messageText: cmd,
+      displayText: approved ? "Approve Remediation Plan" : "Skip Remediation",
+      appName,
+    });
+  };
+
   const currentSessionState = hookState || sessionState;
   const currentLogs = activeLogs.length > 0 ? activeLogs : historicalLog;
   const elapsedSeconds = Math.floor(elapsedMs / 1000);
@@ -299,30 +344,67 @@ export function ADKAgentChat({
           showSidebar && sidebarOpen ? "md:ml-[280px]" : showSidebar ? "md:ml-[60px]" : ""
         }`}
       >
-        {/* Mobile Floating Sidebar Toggle */}
-        {showSidebar && !sidebarOpen && (
-          <button
-            onClick={() => setSidebarOpen(true)}
-            className="fixed top-3 left-3 z-30 md:hidden p-2 rounded-xl bg-white/90 dark:bg-[#212121]/90 backdrop-blur border border-black/10 dark:border-white/10 text-[#737373] dark:text-[#8E8EA0] shadow-sm hover:text-black dark:hover:text-[#ECECF1] cursor-pointer"
-            title="Open sidebar"
-            aria-label="Open sidebar"
-          >
-            <PanelLeft className="h-4 w-4" />
-          </button>
-        )}
+        {/* ─── Top Section (Header + Trace Ribbon - Collapsible) ─── */}
+        {headerVisible ? (
+          <>
+            <GuardianHeader
+              isSidebarOpen={sidebarOpen}
+              onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
+              headerVisible={headerVisible}
+              onToggleHeader={() => setHeaderVisible(false)}
+              activeSessionId={activeSessionId ?? undefined}
+              agentTitle={agentTitle}
+              availableApps={[appName]}
+              activeAppName={appName}
+              onToggleInspector={showConsole ? () => setInspectorOpen(!inspectorOpen) : undefined}
+              inspectorOpen={inspectorOpen}
+              isRunning={isRunning}
+            />
 
-        {/* ─── Interactive User Trace Ribbon Bar ─── */}
-        {showTraceBar && (activeSessionId !== null || isRunning || currentLogs.length > 0) && (
-          <UserTraceBar
-            isRunning={isRunning}
-            activeAgent={activeAgent}
-            activePhase={currentSessionState?.evaluation_grade ? `Grade ${currentSessionState.evaluation_grade} Synthesized` : currentSessionState?.remediation_status}
-            elapsedSeconds={elapsedSeconds}
-            sessionState={currentSessionState || {}}
-            logCount={currentLogs.length}
-            onOpenConsole={() => setInspectorOpen(true)}
-            onOpenArtifacts={() => setInspectorOpen(true)}
-          />
+            {/* ─── Interactive User Trace Ribbon Bar ─── */}
+            {showTraceBar && (activeSessionId !== null || isRunning || currentLogs.length > 0) && (
+              <UserTraceBar
+                isRunning={isRunning}
+                activeAgent={activeAgent}
+                activePhase={currentSessionState?.evaluation_grade ? `Grade ${currentSessionState.evaluation_grade} Synthesized` : currentSessionState?.remediation_status}
+                elapsedSeconds={elapsedSeconds}
+                sessionState={currentSessionState || {}}
+                logCount={currentLogs.length}
+                onOpenConsole={() => setInspectorOpen(true)}
+                onOpenArtifacts={() => setInspectorOpen(true)}
+              />
+            )}
+          </>
+        ) : (
+          /* ─── Top-Right Floating Restore Toggle Bar (when full top section is hidden) ─── */
+          <div className="sticky top-2 z-30 flex justify-end px-3 sm:px-6 pointer-events-none mb-1">
+            <div className="pointer-events-auto flex items-center gap-1.5 p-1 bg-white/95 dark:bg-[#212121]/95 backdrop-blur-md border border-black/10 dark:border-white/10 rounded-xl shadow-md animate-in fade-in slide-in-from-top-1 duration-150">
+              <button
+                onClick={() => setHeaderVisible(true)}
+                className="p-1.5 rounded-lg bg-[#2525A3]/10 dark:bg-[#2525A3]/20 hover:bg-[#2525A3] hover:text-white dark:hover:bg-[#2525A3] text-[#2525A3] dark:text-[#A6C3EE] border border-[#2525A3]/30 hover:border-[#2525A3] transition-all cursor-pointer shadow-2xs group"
+                title="Show Header (Alt+H)"
+                aria-label="Show Header"
+              >
+                <ChevronDown className="h-4 w-4 group-hover:text-white transition-colors" />
+              </button>
+
+              {showConsole && (
+                <button
+                  onClick={() => setInspectorOpen(!inspectorOpen)}
+                  className={`flex items-center gap-1 px-2 py-1 rounded-lg border transition-colors cursor-pointer text-xs ${
+                    inspectorOpen
+                      ? "bg-[#2525A3] text-white border-[#2525A3]"
+                      : "border-black/10 dark:border-white/10 text-[#737373] dark:text-[#8E8EA0] hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5"
+                  }`}
+                  title="Toggle Console"
+                  aria-label="Toggle Console"
+                >
+                  <SlidersHorizontal className="h-3 w-3" />
+                  <span className="hidden sm:inline text-[11px]">Console</span>
+                </button>
+              )}
+            </div>
+          </div>
         )}
 
         {/* ─── Main Chat Conversation View ─── */}
@@ -330,7 +412,7 @@ export function ADKAgentChat({
           {/* Welcome Screen when Empty */}
           {currentLogs.length === 0 && !isRunning && !liveEntry && (
             <div className="flex flex-col items-center justify-center min-h-[50vh] text-center space-y-6 max-w-lg mx-auto py-12 select-none">
-              <AgentGuardianLogo size={56} withGlow priority />
+              <AgentGuardianLogo size={56} priority />
               <div className="space-y-2">
                 <h2 className="text-2xl font-bold tracking-tight text-black dark:text-white">
                   {agentTitle}
@@ -382,6 +464,8 @@ export function ADKAgentChat({
               turn={idx + 1}
               onInspectDelta={() => setInspectorOpen(true)}
               onInspectEvent={() => setInspectorOpen(true)}
+              onApproveRemediation={() => handleRemediationDecision(true)}
+              onSkipRemediation={() => handleRemediationDecision(false)}
             />
           ))}
 
@@ -393,6 +477,8 @@ export function ADKAgentChat({
               isStreaming={true}
               onInspectDelta={() => setInspectorOpen(true)}
               onInspectEvent={() => setInspectorOpen(true)}
+              onApproveRemediation={() => handleRemediationDecision(true)}
+              onSkipRemediation={() => handleRemediationDecision(false)}
             />
           )}
 

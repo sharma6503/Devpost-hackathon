@@ -153,6 +153,41 @@ def setup_platform_compat():
                 except Exception as _e:
                     logger.warning("Could not reconfigure %s to UTF-8: %s", _stream_name, _e)
 
+    # Patch ADK SqliteSessionService to handle concurrent sub-agent event appends and compaction races
+    try:
+        from google.adk.sessions.sqlite_session_service import SqliteSessionService
+        from google.adk.errors._stale_session_error import StaleSessionError
+
+        _orig_append_event = SqliteSessionService.append_event
+
+        async def _safe_append_event(self, session, event):
+            # In multi-agent parallel workflows or during background compaction, concurrent
+            # coroutines can update storage_update_time ahead of a local session reference.
+            # Auto-sync session timestamp and retry rather than crashing the workflow.
+            for attempt in range(3):
+                try:
+                    return await _orig_append_event(self, session, event)
+                except StaleSessionError:
+                    if attempt == 2:
+                        session.last_update_time = event.timestamp
+                        return await _orig_append_event(self, session, event)
+                    try:
+                        async with self._get_db_connection() as db:
+                            async with db.execute(
+                                "SELECT update_time FROM sessions WHERE app_name=? AND user_id=? AND id=?",
+                                (session.app_name, session.user_id, session.id),
+                            ) as cursor:
+                                row = await cursor.fetchone()
+                                if row:
+                                    session.last_update_time = row["update_time"]
+                    except Exception:
+                        session.last_update_time = event.timestamp
+                    await asyncio.sleep(0.02 * (attempt + 1))
+
+        SqliteSessionService.append_event = _safe_append_event
+    except Exception as _e:
+        logger.debug("Could not patch SqliteSessionService.append_event: %s", _e)
+
 
 def get_binary_path(name: str) -> str | None:
     """Check for existence of a binary (uvx, npx, node) in the system path."""

@@ -3,24 +3,27 @@ from __future__ import annotations
 """
 skill_loader.py — GCP Skill Registry integration, local skill discovery, and formatting for Agent Guardian.
 
-Integrates with Google Cloud Skill Registry (GCPSkillRegistry) and ADK's SkillToolset.
+Integrates with Google Cloud Skill Registry (RobustGCPSkillRegistry) and ADK's SkillToolset.
 Supports:
-1. Dynamic remote skill discovery, search, and retrieval from GCPSkillRegistry.
-2. Local filesystem skill discovery and loading via ADK's `load_skills_from_dir` / `load_skill_from_dir`.
-3. User-configured skills via environment variables (`GCP_SKILLS` / `SKILLS` / `SKILLS_DIR`).
-4. Automatic markdown compilation and integration with Confluence governance rules.
-5. Construction of ADK `SkillToolset` for parallel review experts, followup agent, and root orchestrator.
+1. Dynamic remote skill discovery, search, and retrieval from GCP Agent Platform Skill Registry.
+2. Resilient resolution of domain-prefixed skill IDs (e.g. 'cloud.google.com-agent-platform-prompt-management')
+   and short names (e.g. 'agent-platform-prompt-management').
+3. Multi-location support ('global' and regional endpoints).
+4. Local filesystem skill discovery and loading via ADK's `load_skills_from_dir` / `load_skill_from_dir`.
+5. User-configured skills via environment variables (`GCP_SKILLS` / `SKILLS` / `SKILLS_DIR`).
+6. Automatic markdown compilation and integration with Confluence governance rules.
+7. Construction of ADK `SkillToolset` for parallel review experts, followup agent, and root orchestrator.
 """
 
 import os
 import re
+import time
 import asyncio
 import logging
 import pathlib
 from typing import List, Dict, Tuple, Optional, Union, Any
 from google.adk.skills.models import Skill, Frontmatter
 from google.adk.skills.skill_registry import SkillRegistry
-from google.adk.integrations.skill_registry import GCPSkillRegistry
 from google.adk.tools.skill_toolset import SkillToolset
 
 try:
@@ -44,13 +47,15 @@ _TOOLSET_CACHE: Dict[str, SkillToolset] = {}
 
 
 def normalize_skill_name(raw_name: str) -> str:
-    """Sanitize and normalize a skill name to match ADK kebab/snake case requirements.
+    """Sanitize and normalize a skill name to match ADK kebab/snake case requirements while preserving valid domain characters.
 
     Handles:
     - Full GCP resource paths: 'projects/123/locations/us-central1/skills/my-skill' -> 'my-skill'
+    - Full GCP domain resource paths: 'projects/123/locations/global/skills/cloud.google.com-my-skill' -> 'cloud.google.com-my-skill'
     - File paths / URLs: 'skills/my-skill/SKILL.md' -> 'my-skill'
     - Whitespace and quotes: " 'my-skill' " -> 'my-skill'
     - Uppercase and spaces: 'My Skill' -> 'my-skill'
+    - Underscores: 'test_skill_name' -> 'test-skill-name'
     """
     if not raw_name:
         return ""
@@ -64,8 +69,27 @@ def normalize_skill_name(raw_name: str) -> str:
             cleaned = cleaned.rsplit("/", 1)[-1]
     cleaned = cleaned.strip().lower()
     cleaned = re.sub(r"[\s_]+", "-", cleaned)
-    cleaned = re.sub(r"[^a-z0-9\-_]", "", cleaned)
+    # Allow alphanumeric, hyphens, underscores, and dots (e.g. cloud.google.com-...)
+    cleaned = re.sub(r"[^a-z0-9\-_\.]", "", cleaned)
     return cleaned
+
+
+def get_short_skill_name(name: str) -> str:
+    """Strip common domain prefixes from a skill name to produce a clean display name.
+    
+    Example: 'cloud.google.com-agent-platform-prompt-management' -> 'agent-platform-prompt-management'
+    """
+    if not name:
+        return ""
+    clean = normalize_skill_name(name)
+    if clean.startswith("cloud.google.com-"):
+        return clean[len("cloud.google.com-") :]
+    if "-" in clean and "." in clean.split("-")[0]:
+        # Strip any domain.tld- prefix
+        parts = clean.split("-", 1)
+        if len(parts) == 2:
+            return parts[1]
+    return clean
 
 
 def get_configured_skill_names() -> List[str]:
@@ -88,19 +112,275 @@ def get_configured_skill_names() -> List[str]:
     return names
 
 
+class RobustGCPSkillRegistry(SkillRegistry):
+    """Resilient Google Cloud Skill Registry implementation for ADK.
+
+    Features:
+    1. Direct REST retrieval handling both domain-prefixed IDs (e.g. cloud.google.com-...) and short names.
+    2. Fallback across locations ('global' <-> 'us-central1').
+    3. Project skills listing & semantic/keyword search (bypasses unindexed :search endpoint limitations).
+    4. Caches project skill index for ultra-fast multi-turn tool performance.
+    5. Fallback to local filesystem skills if remote retrieval fails.
+    """
+
+    def __init__(
+        self,
+        project_id: Optional[str] = None,
+        location: Optional[str] = None,
+        credentials: Optional[Any] = None,
+        base_url: Optional[str] = None,
+    ):
+        self.project_id = (
+            project_id
+            or os.environ.get("GOOGLE_CLOUD_PROJECT")
+            or os.environ.get("GCP_PROJECT")
+            or ""
+        )
+        self.location = (
+            location
+            or os.environ.get("GOOGLE_CLOUD_LOCATION")
+            or os.environ.get("GCP_REGION")
+            or "global"
+        )
+        self.credentials = credentials
+        self.base_url = (
+            base_url
+            or os.environ.get("AGENT_REGISTRY_ENDPOINT")
+            or "https://agentregistry.googleapis.com/v1alpha"
+        )
+        self._skills_list_cache: Optional[List[dict]] = None
+        self._skills_list_cache_time: float = 0.0
+        self._cache_ttl: float = 60.0  # seconds
+
+    async def _get_auth_headers(self) -> Dict[str, str]:
+        """Obtain authenticated HTTP headers for GCP API requests."""
+        import google.auth
+        from google.auth.transport import requests as auth_requests
+
+        creds = self.credentials
+        if creds is None:
+            creds, _ = google.auth.default()
+
+        if not creds.valid:
+            req = auth_requests.Request()
+            await asyncio.to_thread(creds.refresh, req)
+
+        quota_project_id = getattr(creds, "quota_project_id", None) or self.project_id
+        headers = {
+            "Authorization": f"Bearer {creds.token}",
+            "Content-Type": "application/json",
+        }
+        if quota_project_id:
+            headers["x-goog-user-project"] = quota_project_id
+        return headers
+
+    async def _list_project_skills(self, force_refresh: bool = False) -> List[dict]:
+        """Fetch and cache the raw list of skills in the GCP project."""
+        now = time.time()
+        if not force_refresh and self._skills_list_cache is not None and (now - self._skills_list_cache_time) < self._cache_ttl:
+            return self._skills_list_cache
+
+        if not self.project_id:
+            return []
+
+        try:
+            import httpx
+            headers = await self._get_auth_headers()
+            locations_to_try = [self.location]
+            if "global" not in locations_to_try:
+                locations_to_try.append("global")
+            if "us-central1" not in locations_to_try:
+                locations_to_try.append("us-central1")
+
+            all_skills: List[dict] = []
+            seen_ids = set()
+
+            async with httpx.AsyncClient(follow_redirects=True, timeout=10.0) as client:
+                for loc in locations_to_try:
+                    list_url = f"{self.base_url}/projects/{self.project_id}/locations/{loc}/skills"
+                    try:
+                        resp = await client.get(list_url, headers=headers)
+                        if resp.status_code == 200:
+                            skills = resp.json().get("skills", [])
+                            for s in skills:
+                                s_name = s.get("name", "")
+                                if s_name and s_name not in seen_ids:
+                                    seen_ids.add(s_name)
+                                    all_skills.append(s)
+                            if all_skills:
+                                break
+                    except Exception as loc_ex:
+                        logger.debug("RobustGCPSkillRegistry: list failed for location %s: %s", loc, loc_ex)
+
+            self._skills_list_cache = all_skills
+            self._skills_list_cache_time = now
+            return all_skills
+        except Exception as e:
+            logger.debug("RobustGCPSkillRegistry._list_project_skills error: %s", e)
+            return self._skills_list_cache or []
+
+    async def get_skill(self, name: str = "", **kwargs: Any) -> Skill:
+        """Fetch a skill from GCP Agent Registry or local fallback.
+
+        Args:
+            name: Full resource ID, domain-prefixed ID, short display name, or local skill name.
+
+        Returns:
+            A populated Skill object.
+
+        Raises:
+            ValueError: If the skill cannot be found in the registry or local paths.
+        """
+        target_name = name or kwargs.get("name", "") or kwargs.get("skill_name", "")
+        if not target_name:
+            raise ValueError("Skill name must not be empty.")
+
+        clean_name = normalize_skill_name(target_name)
+        short_name = get_short_skill_name(target_name)
+
+        # 1. Check in-memory cache
+        for k in (target_name, clean_name, short_name):
+            if k and k in _GCP_SKILL_CACHE:
+                return _GCP_SKILL_CACHE[k]
+
+        # 2. Fetch directly via GCP REST API
+        skill = await _fetch_gcp_skill_direct(
+            skill_ref=target_name,
+            project_id=self.project_id,
+            location=self.location,
+        )
+        if skill is not None:
+            _GCP_SKILL_CACHE[target_name] = skill
+            if clean_name:
+                _GCP_SKILL_CACHE[clean_name] = skill
+            if short_name:
+                _GCP_SKILL_CACHE[short_name] = skill
+            _GCP_SKILL_CACHE[skill.name] = skill
+            return skill
+
+        # 3. Check local filesystem skills
+        load_local_skills()
+        for k in (target_name, clean_name, short_name):
+            if k and k in _GCP_SKILL_CACHE:
+                return _GCP_SKILL_CACHE[k]
+
+        # 4. Check explicit directory loaders
+        if _ADK_SKILLS_FS_AVAILABLE and load_skill_from_dir is not None:
+            search_dirs = [
+                pathlib.Path.cwd() / "skills",
+                pathlib.Path(__file__).resolve().parent.parent / "skills",
+            ]
+            env_dir = os.environ.get("SKILLS_DIR")
+            if env_dir:
+                search_dirs.insert(0, pathlib.Path(env_dir))
+
+            for base_dir in search_dirs:
+                for candidate in (short_name, clean_name, target_name):
+                    if not candidate:
+                        continue
+                    skill_path = base_dir / candidate
+                    if skill_path.exists() and (skill_path / "SKILL.md").exists():
+                        try:
+                            local_skill = load_skill_from_dir(skill_path)
+                            if local_skill:
+                                _GCP_SKILL_CACHE[target_name] = local_skill
+                                _GCP_SKILL_CACHE[local_skill.name] = local_skill
+                                return local_skill
+                        except Exception:
+                            pass
+
+        raise ValueError(
+            f"Skill '{target_name}' not found in GCP Skill Registry (project={self.project_id}, location={self.location}) or local paths."
+        )
+
+    async def search_skills(self, query: str = "", **kwargs: Any) -> list[Frontmatter]:
+        """Search the GCP Skill Registry and local skills for matching playbooks.
+
+        Args:
+            query: Keyword or semantic search query (e.g. 'prompt', 'gke', 'waf', 'security').
+
+        Returns:
+            List of Frontmatter objects.
+        """
+        search_query = query or kwargs.get("query", "") or kwargs.get("search_query", "") or ""
+        if not search_query or not search_query.strip():
+            # If query is empty, return all available project skills
+            query_str = ""
+        else:
+            query_str = search_query.strip().lower()
+
+        results: List[Frontmatter] = []
+        seen_names = set()
+
+        # 1. Search remote GCP project skills
+        project_skills = await self._list_project_skills()
+        for s in project_skills:
+            s_name = s.get("name", "")
+            s_id = s_name.split("/")[-1] if "/" in s_name else s_name
+            s_display = s.get("displayName", "")
+            s_desc = s.get("description", "") or ""
+            target_name = s_display or get_short_skill_name(s_id) or s_id
+
+            # Matching logic: query in name, display name, description, or id
+            match = False
+            if not query_str:
+                match = True
+            else:
+                tokens = [t for t in re.split(r"[\s\-_]+", query_str) if t]
+                searchable_text = f"{s_name} {s_id} {s_display} {s_desc}".lower()
+                if query_str in searchable_text:
+                    match = True
+                elif any(token in searchable_text for token in tokens):
+                    match = True
+
+            if match and target_name not in seen_names:
+                seen_names.add(target_name)
+                results.append(
+                    Frontmatter(
+                        name=target_name,
+                        description=s_desc,
+                    )
+                )
+
+        # 2. Search local filesystem skills
+        local_skills = load_local_skills()
+        for ls in local_skills:
+            ls_name = ls.name
+            ls_desc = getattr(ls, "description", "") or getattr(getattr(ls, "frontmatter", None), "description", "")
+            if not query_str or query_str in ls_name.lower() or query_str in (ls_desc or "").lower():
+                if ls_name not in seen_names:
+                    seen_names.add(ls_name)
+                    results.append(
+                        Frontmatter(
+                            name=ls_name,
+                            description=ls_desc or "",
+                        )
+                    )
+
+        return results
+
+    def search_tool_description(self) -> str | None:
+        """Instruction prompt for the search_skills tool."""
+        return (
+            "Search for authoritative Google Cloud and organizational skills, standards, and "
+            "playbooks in the GCP Skill Registry by topic or keyword (e.g. 'prompt', 'security', 'gke', "
+            "'waf', 'inference', 'rag', 'governance', 'storage'). Returns skill names and descriptions."
+        )
+
+
 def get_gcp_skill_registry(
     project_id: Optional[str] = None,
     location: Optional[str] = None,
     credentials: Optional[Any] = None,
-) -> Optional[GCPSkillRegistry]:
-    """Instantiate a Google Cloud Skill Registry client.
+) -> Optional[RobustGCPSkillRegistry]:
+    """Instantiate a resilient Google Cloud Skill Registry client.
 
     Reads project and location from environment if not explicitly provided.
     Normalizes environment variables (GOOGLE_CLOUD_PROJECT, GOOGLE_CLOUD_LOCATION).
     Returns None if project_id is unavailable or if construction fails.
     """
     proj = project_id or os.environ.get("GOOGLE_CLOUD_PROJECT") or os.environ.get("GCP_PROJECT")
-    loc = location or os.environ.get("GOOGLE_CLOUD_LOCATION") or os.environ.get("GCP_REGION") or "us-central1"
+    loc = location or os.environ.get("GOOGLE_CLOUD_LOCATION") or os.environ.get("GCP_REGION") or "global"
     if not proj:
         logger.debug("get_gcp_skill_registry: GOOGLE_CLOUD_PROJECT not set, registry disabled.")
         return None
@@ -110,11 +390,11 @@ def get_gcp_skill_registry(
     os.environ.setdefault("GOOGLE_CLOUD_LOCATION", loc)
 
     try:
-        registry = GCPSkillRegistry(project_id=proj, location=loc, credentials=credentials)
-        logger.info("get_gcp_skill_registry: GCPSkillRegistry initialized (project=%s, location=%s)", proj, loc)
+        registry = RobustGCPSkillRegistry(project_id=proj, location=loc, credentials=credentials)
+        logger.info("get_gcp_skill_registry: RobustGCPSkillRegistry initialized (project=%s, location=%s)", proj, loc)
         return registry
     except Exception as e:
-        logger.warning("get_gcp_skill_registry: failed to initialize GCPSkillRegistry: %s", e)
+        logger.warning("get_gcp_skill_registry: failed to initialize RobustGCPSkillRegistry: %s", e)
         return None
 
 
@@ -237,43 +517,78 @@ async def _fetch_gcp_skill_direct(
             headers["x-goog-user-project"] = quota_project_id
 
         base_url = os.environ.get("AGENT_REGISTRY_ENDPOINT", "https://agentregistry.googleapis.com/v1alpha")
+        clean_ref = normalize_skill_name(skill_ref)
+        short_ref = get_short_skill_name(skill_ref)
 
-        async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
+        locations_to_try = [loc]
+        if "global" not in locations_to_try:
+            locations_to_try.append("global")
+
+        # Prioritize cloud.google.com- prefix since enterprise GCP skills use this ID convention
+        candidates = []
+        for c in (
+            f"cloud.google.com-{clean_ref}",
+            f"cloud.google.com-{short_ref}",
+            skill_ref,
+            clean_ref,
+            short_ref,
+        ):
+            if c and c not in candidates:
+                candidates.append(c)
+
+        async with httpx.AsyncClient(follow_redirects=True, timeout=10.0) as client:
             data = None
-            # 1. Direct GET if full resource path or exact ID
+            found_loc = loc
+
+            # 1. Try direct GET for full resource path or exact ID across locations
             if skill_ref.startswith("projects/"):
                 skill_url = f"{base_url}/{skill_ref}"
                 resp = await client.get(skill_url, headers=headers)
                 if resp.status_code == 200:
                     data = resp.json()
             else:
-                skill_url = f"{base_url}/projects/{proj}/locations/{loc}/skills/{skill_ref}"
-                resp = await client.get(skill_url, headers=headers)
-                if resp.status_code == 200:
-                    data = resp.json()
+                for candidate_name in candidates:
+                    if data:
+                        break
+                    for current_loc in locations_to_try:
+                        skill_url = f"{base_url}/projects/{proj}/locations/{current_loc}/skills/{candidate_name}"
+                        try:
+                            resp = await client.get(skill_url, headers=headers)
+                            if resp.status_code == 200:
+                                data = resp.json()
+                                found_loc = current_loc
+                                break
+                        except Exception:
+                            continue
 
-            # 2. If not found, list skills in project and match by displayName or suffix
+            # 2. If direct GET did not find it, list skills in project and match by displayName, id, or suffix
             if not data:
-                list_url = f"{base_url}/projects/{proj}/locations/{loc}/skills"
-                list_resp = await client.get(list_url, headers=headers)
-                if list_resp.status_code == 200:
-                    for s in list_resp.json().get("skills", []):
-                        s_name = s.get("name", "")
-                        s_display = s.get("displayName", "")
-                        s_id = s_name.split("/")[-1] if "/" in s_name else s_name
-                        clean_ref = normalize_skill_name(skill_ref)
-                        if (
-                            skill_ref == s_name
-                            or skill_ref == s_id
-                            or skill_ref == s_display
-                            or clean_ref == normalize_skill_name(s_display)
-                            or clean_ref == normalize_skill_name(s_id)
-                            or s_id.endswith(f"-{skill_ref}")
-                            or s_id.endswith(f".{skill_ref}")
-                            or s_id.endswith(f"-{clean_ref}")
-                        ):
-                            data = s
-                            break
+                for current_loc in locations_to_try:
+                    list_url = f"{base_url}/projects/{proj}/locations/{current_loc}/skills"
+                    try:
+                        list_resp = await client.get(list_url, headers=headers)
+                        if list_resp.status_code == 200:
+                            for s in list_resp.json().get("skills", []):
+                                s_name = s.get("name", "")
+                                s_display = s.get("displayName", "")
+                                s_id = s_name.split("/")[-1] if "/" in s_name else s_name
+                                s_short = get_short_skill_name(s_id)
+
+                                if (
+                                    skill_ref in (s_name, s_id, s_display, s_short)
+                                    or clean_ref in (s_id, s_display, s_short, normalize_skill_name(s_display), normalize_skill_name(s_id))
+                                    or short_ref in (s_id, s_display, s_short, normalize_skill_name(s_display), normalize_skill_name(s_id))
+                                    or s_id.endswith(f"-{clean_ref}")
+                                    or s_id.endswith(f"-{short_ref}")
+                                    or s_id.endswith(f".{clean_ref}")
+                                ):
+                                    data = s
+                                    found_loc = current_loc
+                                    break
+                    except Exception:
+                        continue
+                    if data:
+                        break
 
             if not data:
                 return None
@@ -283,15 +598,38 @@ async def _fetch_gcp_skill_direct(
                 return None
 
             rev_url = f"{base_url}/{rev}" if not rev.startswith("http") else rev
-            media_resp = await client.get(rev_url, headers=headers, params={"alt": "media"})
-            if media_resp.status_code != 200:
+            media_content = None
+            
+            # Request media download with manual redirect handling to preserve auth headers on Google API endpoints
+            media_resp = await client.get(rev_url, headers=headers, params={"alt": "media"}, follow_redirects=False)
+            if media_resp.status_code == 200:
+                media_content = media_resp.content
+            elif media_resp.status_code in (301, 302, 303, 307, 308):
+                redirect_url = media_resp.headers.get("Location") or media_resp.headers.get("location")
+                if redirect_url:
+                    # If redirected to an authenticated Google API endpoint, maintain auth headers
+                    if "agentregistry.googleapis.com" in redirect_url or ("googleapis.com" in redirect_url and "storage.googleapis.com" not in redirect_url):
+                        dl_resp = await client.get(redirect_url, headers=headers)
+                    else:
+                        # Direct GCS signed URLs must not have auth headers
+                        dl_resp = await client.get(redirect_url)
+                        if dl_resp.status_code in (401, 403):
+                            # Fallback with headers if signed URL was not self-sufficient
+                            dl_resp = await client.get(redirect_url, headers=headers)
+                    
+                    if dl_resp.status_code == 200:
+                        media_content = dl_resp.content
+                    else:
+                        logger.warning("_fetch_gcp_skill_direct: redirect download failed (%s) from %s", dl_resp.status_code, redirect_url)
+
+            if not media_content:
                 logger.warning("_fetch_gcp_skill_direct: media download failed (%s) for %s", media_resp.status_code, rev)
                 return None
 
-            skill = await asyncio.to_thread(_utils._load_skill_from_zip_bytes, media_resp.content)
+            skill = await asyncio.to_thread(_utils._load_skill_from_zip_bytes, media_content)
             if skill:
                 skill._uri = rev_url
-                logger.info("_fetch_gcp_skill_direct: successfully loaded GCP skill '%s' (rev: %s)", skill.name, rev)
+                logger.info("_fetch_gcp_skill_direct: successfully loaded GCP skill '%s' (rev: %s, loc: %s)", skill.name, rev, found_loc)
                 return skill
     except Exception as e:
         logger.debug("_fetch_gcp_skill_direct: error fetching '%s': %s", skill_ref, e)
@@ -302,93 +640,104 @@ async def _fetch_gcp_skill_direct(
 
 async def fetch_skill_by_name(
     skill_name: str,
-    registry: Optional[GCPSkillRegistry] = None,
+    registry: Optional[SkillRegistry] = None,
     use_cache: bool = True,
 ) -> Optional[Skill]:
     """Fetch a single skill from GCP Skill Registry or local fallback cache.
 
     Args:
         skill_name: Raw or normalized skill name (e.g. 'agent-platform-prompt-management' or full GCP path).
-        registry: Optional GCPSkillRegistry instance.
+        registry: Optional SkillRegistry instance.
         use_cache: Whether to use cached skill instances.
 
     Returns:
         Skill object if found, or None.
     """
     name = normalize_skill_name(skill_name)
+    short_name = get_short_skill_name(skill_name)
     if not name and not skill_name:
         return None
 
-    cache_key = name or skill_name
-    if use_cache and cache_key in _GCP_SKILL_CACHE:
-        return _GCP_SKILL_CACHE[cache_key]
-    if use_cache and skill_name in _GCP_SKILL_CACHE:
-        return _GCP_SKILL_CACHE[skill_name]
+    # Check caches
+    if use_cache:
+        for k in (skill_name, name, short_name):
+            if k and k in _GCP_SKILL_CACHE:
+                return _GCP_SKILL_CACHE[k]
 
-    # 1. Direct GCP REST resolution (handles domain prefixes like cloud.google.com-...)
+    # 1. Custom / passed registry get_skill
+    reg = registry or get_gcp_skill_registry()
+    if reg is not None:
+        try:
+            skill = await reg.get_skill(name=name or skill_name)
+            if skill is not None:
+                if use_cache:
+                    _GCP_SKILL_CACHE[skill_name] = skill
+                    _GCP_SKILL_CACHE[skill.name] = skill
+                    if name:
+                        _GCP_SKILL_CACHE[name] = skill
+                    if short_name:
+                        _GCP_SKILL_CACHE[short_name] = skill
+                return skill
+        except Exception as reg_ex:
+            logger.debug("fetch_skill_by_name: registry get_skill failed for '%s': %s", skill_name, reg_ex)
+
+    # 2. Direct GCP REST resolution
     direct_skill = await _fetch_gcp_skill_direct(skill_name)
     if direct_skill is not None:
         if use_cache:
             _GCP_SKILL_CACHE[direct_skill.name] = direct_skill
+            _GCP_SKILL_CACHE[skill_name] = direct_skill
             if name:
                 _GCP_SKILL_CACHE[name] = direct_skill
-            _GCP_SKILL_CACHE[skill_name] = direct_skill
+            if short_name:
+                _GCP_SKILL_CACHE[short_name] = direct_skill
         return direct_skill
-
-    # 2. GCPSkillRegistry SDK get_skill fallback
-    reg = registry or get_gcp_skill_registry()
-    if reg is not None and name:
-        try:
-            logger.info("fetch_skill_by_name: fetching '%s' from GCPSkillRegistry...", name)
-            skill = await reg.get_skill(name=name)
-            if skill is not None:
-                if use_cache:
-                    _GCP_SKILL_CACHE[name] = skill
-                    _GCP_SKILL_CACHE[skill.name] = skill
-                logger.info("fetch_skill_by_name: successfully fetched '%s' from GCP Skill Registry", name)
-                return skill
-        except Exception as e:
-            logger.warning("fetch_skill_by_name: failed to fetch '%s' from GCPSkillRegistry: %s", name, e)
 
     # 3. Local filesystem fallback check
     load_local_skills()
-    if name in _GCP_SKILL_CACHE:
-        return _GCP_SKILL_CACHE[name]
+    if use_cache:
+        for k in (skill_name, name, short_name):
+            if k and k in _GCP_SKILL_CACHE:
+                return _GCP_SKILL_CACHE[k]
 
     # 4. Additional directory check
     if _ADK_SKILLS_FS_AVAILABLE and load_skill_from_dir is not None and name:
-        search_dirs = []
-        env_dir = os.environ.get("SKILLS_DIR")
-        if env_dir:
-            search_dirs.append(pathlib.Path(env_dir))
-        search_dirs.extend([
+        search_dirs = [
             pathlib.Path.cwd() / "skills",
             pathlib.Path(__file__).resolve().parent.parent / "skills",
-        ])
+        ]
+        env_dir = os.environ.get("SKILLS_DIR")
+        if env_dir:
+            search_dirs.insert(0, pathlib.Path(env_dir))
+
         for base_dir in search_dirs:
-            skill_path = base_dir / name
-            if skill_path.exists() and (skill_path / "SKILL.md").exists():
-                try:
-                    skill = load_skill_from_dir(skill_path)
-                    if skill:
-                        if use_cache:
-                            _GCP_SKILL_CACHE[name] = skill
-                        return skill
-                except Exception:
-                    pass
+            for candidate in (short_name, name, skill_name):
+                if not candidate:
+                    continue
+                skill_path = base_dir / candidate
+                if skill_path.exists() and (skill_path / "SKILL.md").exists():
+                    try:
+                        skill = load_skill_from_dir(skill_path)
+                        if skill:
+                            if use_cache:
+                                _GCP_SKILL_CACHE[skill_name] = skill
+                                _GCP_SKILL_CACHE[skill.name] = skill
+                            return skill
+                    except Exception:
+                        pass
 
     return None
 
 
 async def search_gcp_skills(
     query: str,
-    registry: Optional[GCPSkillRegistry] = None,
+    registry: Optional[SkillRegistry] = None,
 ) -> List[Frontmatter]:
     """Search for skills in the GCP Skill Registry using a query string.
 
     Args:
         query: Semantic or keyword search query (e.g. 'governance', 'security', 'adk', 'cloud', 'prompt').
-        registry: Optional GCPSkillRegistry instance.
+        registry: Optional SkillRegistry instance.
 
     Returns:
         List of Frontmatter objects found in the registry.
@@ -396,74 +745,23 @@ async def search_gcp_skills(
     if not query or not query.strip():
         return []
 
-    query_str = query.strip().lower()
-
-    # 1. GCPSkillRegistry SDK search_skills
     reg = registry or get_gcp_skill_registry()
     if reg is not None:
         try:
-            logger.info("search_gcp_skills: searching GCP Skill Registry for '%s'...", query)
+            logger.info("search_gcp_skills: searching Skill Registry for '%s'...", query)
             results = await reg.search_skills(query=query.strip())
             if results:
                 logger.info("search_gcp_skills: found %d skill(s) for query '%s'", len(results), query)
                 return results
         except Exception as e:
-            logger.debug("search_gcp_skills: GCPSkillRegistry search failed: %s", e)
-
-    # 2. Direct GCP REST search/list
-    proj = os.environ.get("GOOGLE_CLOUD_PROJECT") or os.environ.get("GCP_PROJECT")
-    loc = os.environ.get("GOOGLE_CLOUD_LOCATION") or os.environ.get("GCP_REGION") or "global"
-    if proj:
-        try:
-            import google.auth
-            from google.auth.transport import requests as auth_requests
-            import httpx
-
-            credentials, _ = google.auth.default()
-            if not credentials.valid:
-                req = auth_requests.Request()
-                await asyncio.to_thread(credentials.refresh, req)
-
-            headers = {
-                "Authorization": f"Bearer {credentials.token}",
-                "Content-Type": "application/json",
-                "x-goog-user-project": proj,
-            }
-            base_url = os.environ.get("AGENT_REGISTRY_ENDPOINT", "https://agentregistry.googleapis.com/v1alpha")
-            async with httpx.AsyncClient(follow_redirects=True, timeout=15.0) as client:
-                list_url = f"{base_url}/projects/{proj}/locations/{loc}/skills"
-                resp = await client.get(list_url, headers=headers)
-                if resp.status_code == 200:
-                    skills_data = resp.json().get("skills", [])
-                    matched: List[Frontmatter] = []
-                    for s in skills_data:
-                        s_name = s.get("name", "").split("/")[-1]
-                        s_display = s.get("displayName", "")
-                        s_desc = s.get("description", "") or ""
-                        if (
-                            not query_str
-                            or query_str in s_name.lower()
-                            or query_str in s_display.lower()
-                            or query_str in s_desc.lower()
-                        ):
-                            matched.append(
-                                Frontmatter(
-                                    name=s_display or s_name,
-                                    description=s_desc,
-                                )
-                            )
-                    if matched:
-                        logger.info("search_gcp_skills: found %d skill(s) via direct project listing", len(matched))
-                        return matched
-        except Exception as e:
-            logger.debug("search_gcp_skills: direct list fallback failed: %s", e)
+            logger.debug("search_gcp_skills: registry search failed: %s", e)
 
     return []
 
 
 async def search_and_fetch_gcp_skills(
     query: str,
-    registry: Optional[GCPSkillRegistry] = None,
+    registry: Optional[SkillRegistry] = None,
     limit: int = 5,
     use_cache: bool = True,
 ) -> List[Skill]:
@@ -471,7 +769,7 @@ async def search_and_fetch_gcp_skills(
 
     Args:
         query: Semantic or keyword search query.
-        registry: Optional GCPSkillRegistry instance.
+        registry: Optional SkillRegistry instance.
         limit: Maximum number of skills to fetch.
         use_cache: Whether to use cached skill instances.
 
@@ -494,7 +792,7 @@ async def search_and_fetch_gcp_skills(
 
 async def fetch_configured_gcp_skills(
     skill_names: Optional[List[str]] = None,
-    registry: Optional[GCPSkillRegistry] = None,
+    registry: Optional[SkillRegistry] = None,
     use_cache: bool = True,
     search_queries: Optional[List[str]] = None,
 ) -> List[Skill]:
@@ -502,7 +800,7 @@ async def fetch_configured_gcp_skills(
 
     Args:
         skill_names: Optional list of skill names. Defaults to `get_configured_skill_names()`.
-        registry: Optional GCPSkillRegistry instance. Defaults to `get_gcp_skill_registry()`.
+        registry: Optional SkillRegistry instance. Defaults to `get_gcp_skill_registry()`.
         use_cache: Whether to use cached skill instances.
         search_queries: Optional search queries to discover relevant skills if explicit names are empty.
 
@@ -529,18 +827,14 @@ async def fetch_configured_gcp_skills(
 
     skills: List[Skill] = []
     for raw_name in names:
-        name = normalize_skill_name(raw_name)
-        if not name:
-            continue
-
-        skill = await fetch_skill_by_name(name, registry=reg, use_cache=use_cache)
+        skill = await fetch_skill_by_name(raw_name, registry=reg, use_cache=use_cache)
         if skill is not None:
             if skill not in skills:
                 skills.append(skill)
         else:
             logger.warning(
                 "fetch_configured_gcp_skills: skill '%s' not found in GCP registry or local paths.",
-                name,
+                raw_name,
             )
 
     return skills
@@ -563,7 +857,8 @@ def compile_skills_to_markdown(skills: List[Skill]) -> str:
     )
 
     for skill in skills:
-        markdown_parts.append(f"### Skill: {skill.name}")
+        display_name = get_short_skill_name(skill.name) or skill.name
+        markdown_parts.append(f"### Skill: {display_name}")
         description = getattr(skill, "description", "") or getattr(getattr(skill, "frontmatter", None), "description", "")
         if description:
             markdown_parts.append(f"**Description**: {description}")
@@ -665,7 +960,7 @@ def get_skill_toolset(
     load_local_skills()
 
     proj = os.environ.get("GOOGLE_CLOUD_PROJECT") or os.environ.get("GCP_PROJECT") or ""
-    loc = os.environ.get("GOOGLE_CLOUD_LOCATION") or os.environ.get("GCP_REGION") or "us-central1"
+    loc = os.environ.get("GOOGLE_CLOUD_LOCATION") or os.environ.get("GCP_REGION") or "global"
     cache_key = f"{len(skills or [])}:{use_registry}:{proj}:{loc}"
     if use_cache and cache_key in _TOOLSET_CACHE:
         return _TOOLSET_CACHE[cache_key]

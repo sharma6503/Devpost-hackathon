@@ -99,6 +99,9 @@ class ReviewState(BaseModel):
     ingest_skipped: list = Field(default_factory=list)
     ingest_truncated: bool = False
 
+    # Ingestion & Uploads
+    uploaded_zip_path: str = ""
+
     # Constitution & Rules
     constitution: str = "Be professional and concise."
     confluence_rules: str = (
@@ -106,6 +109,13 @@ class ReviewState(BaseModel):
         "Use built-in baselines and DO NOT claim Confluence validation."
     )
     confluence_pages_index: str = ""
+    confluence_host_map_json: str = ""
+
+    # GCP Skills & Extensions (from gcp_skill_pull / skills retrieval)
+    retrieved_gcp_skills: Optional[list] = None
+    gcp_skills: Optional[list] = None
+    skills: Optional[list] = None
+    skill_search_queries: Optional[list] = None
 
     # Review Plan (from planning_agent)
     review_plan: Optional[Union[ReviewPlan, Dict[str, Any], str]] = None
@@ -182,6 +192,13 @@ _PRESERVE_KEYS = {
     # survive every per-review reset or it's lost after the first audit.
     "user_department",
     "user_country",
+    # Configuration and uploaded asset paths that identify current turn/session
+    "uploaded_zip_path",
+    "confluence_host_map_json",
+    "gcp_skills",
+    "skills",
+    "skill_search_queries",
+    "retrieved_gcp_skills",
 }
 
 # Run-scoped keys written OUTSIDE ReviewState's public schema (so absent from
@@ -262,12 +279,8 @@ def reset_review_state(state: Any) -> None:
         # Re-arm the Human-in-the-Loop remediation gate. remediation_approved is an
         # orphan key (not a ReviewState field), so it's cleared via pop() above — but
         # ADK's session-state delta model does NOT reliably propagate a key DELETION
-        # the way it propagates a SET. If a prior review in the same session approved
-        # remediation (setting remediation_approved=True via constitution_callback),
-        # a pop() alone can leave that True latched in the persisted state, so the
-        # next review's executor skips the approval pause and auto-creates a PR
-        # (the user never sees the Approve/Skip button). Explicitly SETTING the flag
-        # to False emits a propagating delta that reliably re-arms the gate.
+        # the way it propagates a SET. Setting it explicitly to False emits a
+        # propagating delta that reliably re-arms the gate.
         try:
             state["remediation_approved"] = False
         except Exception as gate_err:

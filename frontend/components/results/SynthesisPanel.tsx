@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { ChevronDown, FileText, Sparkles, ShieldCheck } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { chatMarkdownComponents } from "@/components/review/ChatLogRow";
 
 interface SynthesisPanelProps {
   content?: string;
@@ -55,7 +56,7 @@ export function SynthesisPanel({ content }: SynthesisPanelProps) {
             className="overflow-hidden"
           >
             <div className="p-6 text-black dark:text-[#ECECF1] prose prose-neutral dark:prose-invert prose-sm max-w-none font-sans leading-relaxed overflow-x-auto">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={chatMarkdownComponents}>{content}</ReactMarkdown>
             </div>
           </motion.div>
         )}

@@ -113,24 +113,26 @@ ehthumbs.db
 MEMORY.md
 .antigravitycli/
 .cm_project
+.commitshow/
 .mcp.json
+.agents/
+.superpowers/
 
 # Compressed files
 *.zip
 *.tar.gz
 *.7z
 
-#temp files
-
+# Temp files & directories
 implementation_plan.md
 .vscode/
 plans/
-.agents/
 scratch/
 /graphify-out
+graphify-out/
 
 # Clean-up / Linting Task
 .ruff_cache/
-.superpowers/
 *.log
 0.26.0
+*.tsbuildinfo

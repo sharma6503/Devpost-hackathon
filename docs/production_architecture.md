@@ -13,7 +13,7 @@ Key highlights of this production architecture include:
 *   **Interactive Tool & Thought Telemetry:** Real-time rendering of reasoning chains (`thought`), tool calls with JSON argument inspection, tool returns, and raw event inspection.
 *   **Decoupled Asynchronous Processing:** Isolates long-running multi-agent audits from web requests using a serverless task queue and real-time SSE streams.
 *   **Vertex AI Context Caching:** Minimizes LLM cost and response latency by caching large codebase structures during iterative reviews (up to 90% token reduction).
-*   **End-to-End Observability:** Integrates Google Cloud Trace (via OpenTelemetry) and Datadog LLM Observability for span attribution.
+*   **End-to-End Observability:** Native OpenTelemetry distributed tracing exported to **Google Cloud Trace** (`opentelemetry-exporter-gcp-trace`), providing granular span attribution across subagents, LLM calls, and tool runs.
 *   **Infrastructure-as-Code & Secure DevSecOps:** Fully managed using Terraform with strict workload identity federation (OIDC) via Bitbucket Pipelines.
 
 ---
@@ -31,10 +31,10 @@ graph TD
     Worker <--> |Vertex AI SDK / API| Gemini[[Vertex AI Gemini API<br/>Pro / Flash with Context Cache]]
     Worker <--> |REST API| GitHub[[GitHub / Bitbucket Cloud]]
     Worker <--> |Fetch Rules| Confluence[[Atlassian Confluence API]]
-    Worker <--> |Read / Write Assets| GCS[(Cloud Storage GCS<br/>ZIPs, Reports & Metrics)]
+    Worker <--> |Read / Write Assets| GCS[(Cloud Storage GCS<br/>gs://agentguardian-prod-artifacts)]
     Worker --> |Update Review Progress| Firestore
     FastApi <--> |Read Logs / Findings| GCS
-    Worker -.-> |OTel Trace / Spans| Trace[Google Cloud Trace<br/>& Datadog LLM Obs]
+    Worker -.-> |OTel Spans / Traces| Trace[Google Cloud Trace<br/>OpenTelemetry Distributed Tracing]
 ```
 
 ### Components Breakdown
@@ -158,16 +158,16 @@ To support high-concurrency audits, state tracking is divided between object sto
 }
 ```
 
-### B. Google Cloud Storage Bucket Structure
+### B. Google Cloud Storage Bucket Structure (`ARTIFACT_SERVICE_URI`)
 ```
-gs://agenticai-agentguardian-prod-assets/
-├── uploads/                     # Temporary repository ZIP files
-│   └── [sessionId].zip
-├── charts/                      # Generated Seaborn health visualizations
-│   └── [sessionId]_health.png
-└── reports/                     # Output audit artifacts
-    ├── [sessionId]_executive.md
-    └── [sessionId]_dashboard.html
+gs://agentguardian-prod-artifacts/
+├── apps/agent_guardian/users/{userId}/sessions/{sessionId}/
+│   └── artifacts/               # ADK GcsArtifactService managed files
+│       ├── report.html          # Standalone executive HTML report
+│       ├── remediation_patch.diff # Automated code repair diff
+│       └── metrics_summary.json # Machine-readable metrics payload
+└── uploads/                     # Temporary repository ZIP payloads
+    └── [sessionId].zip
 ```
 
 ---
@@ -184,18 +184,20 @@ Integrated directly via `bitbucket-pipelines.yml`:
 1.  **Code Validation:** Run metadata validity checks and SonarCloud scan tasks.
 2.  **Security Analysis:** Run Checkmarx scanning pipeline to discover vulnerabilities in the codebase before deploying.
 3.  **IaC Stages:** Automatically plan and apply Terraform-based configurations (`terraform plan` and `terraform apply -auto-approve` upon master branch mergers) with workload identity federation (OIDC) eliminating the risk of hardcoded GCP service keys.
-4.  **Continuous Deploy:** Package the backend and frontend into Docker containers, push to Google Artifact Registry, and release to Google Cloud Run.
+4.  **Continuous Deploy:** Package the backend and frontend into Docker containers, push to Google Artifact Registry (`us-central1-docker.pkg.dev`), and release to Google Cloud Run.
 
 ---
 
 ## 7. Observability, Telemetry & Security
 A production auditing platform must possess world-class observability to track agent decisions and protect proprietary source code.
 
-### A. Observability and Telemetry
-*   **OpenTelemetry Integration:** Configured with `setup_platform_compat()` and `maybe_set_otel_providers(otel_hooks_to_setup=[hooks])` in the entry point to push full trace propagation directly to **Google Cloud Trace**.
+### A. Observability and Telemetry (Google Cloud Trace & OpenTelemetry)
+*   **Native ADK Cloud Tracing:** Initialized via `agent_guardian.utils.tracing.setup_cloud_tracing()`, utilizing `google.adk.telemetry.google_cloud.get_gcp_exporters` and `google.adk.telemetry.setup.maybe_set_otel_providers`.
+*   **OpenTelemetry Span Propagation:** Exports trace spans directly to **Google Cloud Trace** via `opentelemetry-exporter-gcp-trace` and `opentelemetry-exporter-otlp-proto-http`, capturing subagent hierarchies, LLM generation latencies, and tool execution timings.
+*   **GenAI Semantic Conventions:** Configured with `OTEL_SEMCONV_STABILITY_OPT_IN=gen_ai_agent_spans` and `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true` for deep auditability of Gemini model inputs, outputs, and reasoning steps.
 *   **Error Demoting:** Custom `_McpTimeoutFilter` blocks noisy, non-critical MCP/network session timeout logs from flooding the system, while ensuring genuine authorization or permission failures reach Cloud Run logs instantly.
 
 ### B. Security Hardening
 *   **Identity & Credentials Protection:** Strict adherence to OIDC. The API and Workers run under minimal-permission Google IAM Service Accounts (`svc-bitbucket-pipeline@...`).
 *   **Strict Scope Isolation:** The `planning_agent` extracts and authorizes the repository context using a sanitizing regular expression callback. Experts and validation tools are strictly bound to access **only** files inside the workspace directory, completely preventing path-traversal vulnerabilities.
-*   **LLM Safety Settings:** Configured via `safety_config` with robust safety thresholds (`HARM_CATEGORY_DANGEROUS_CONTENT` tuned to `BLOCK_ONLY_HIGH` to allow technical analysis of security vulnerabilites without triggering false-positive blocks).
+*   **LLM Safety Settings:** Configured via `safety_config` with robust safety thresholds (`HARM_CATEGORY_DANGEROUS_CONTENT` tuned to `BLOCK_ONLY_HIGH` to allow technical analysis of security vulnerabilities without triggering false-positive blocks).

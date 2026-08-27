@@ -187,6 +187,7 @@ FIRST check if `{{{state_key}?}}` is already populated in state (it starts with 
         instruction=instruction,
         output_key=state_key,
         tools=[fetch_page_by_id],
+        include_contents="none",
         disallow_transfer_to_peers=True,
         generate_content_config=_cfg.safety_config,
     )
@@ -325,5 +326,6 @@ else:
         instruction=(f"No Confluence pages are configured. Output exactly: {_UNAVAILABLE_SENTINEL}"),
         output_key="confluence_rules",
         tools=[_noop_tool],
+        include_contents="none",
         generate_content_config=_cfg.safety_config,
     )

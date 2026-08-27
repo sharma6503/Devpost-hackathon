@@ -75,6 +75,8 @@ from agent_guardian.tools import (
     github_create_or_update_file,
     github_create_pull_request,
     github_apply_remediation_plan,
+    bitbucket_apply_remediation_plan,
+    apply_remediation_plan,
     github_fetch_file_raw,
     get_file_contents,
     create_branch,
@@ -138,9 +140,9 @@ _SRC_PATH_RE = re.compile(
     r"|toml|ini|cfg|txt|md|html|css|scss|sh|go|java|rb|rs|cpp|cc|hpp|c|h|sql|env|dockerfile))"
     r"(?![A-Za-z0-9])"
 )
-_MAX_SOURCE_FILES = _env_int("REMEDIATION_MAX_SOURCE_FILES", 12)
-_MAX_SOURCE_FILE_BYTES = _env_int("REMEDIATION_MAX_SOURCE_FILE_BYTES", 20000)
-_MAX_SOURCE_TOTAL_BYTES = _env_int("REMEDIATION_MAX_SOURCE_TOTAL_BYTES", 90000)
+_MAX_SOURCE_FILES = _env_int("REMEDIATION_MAX_SOURCE_FILES", 25)
+_MAX_SOURCE_FILE_BYTES = _env_int("REMEDIATION_MAX_SOURCE_FILE_BYTES", 30000)
+_MAX_SOURCE_TOTAL_BYTES = _env_int("REMEDIATION_MAX_SOURCE_TOTAL_BYTES", 250000)
 
 
 async def _planner_before_callback(callback_context: CallbackContext):
@@ -416,21 +418,30 @@ def _executor_before_callback(callback_context: CallbackContext):
 
     plan = {}
     plan_raw = callback_context.state.get("remediation_plan", "")
-    try:
-        if isinstance(plan_raw, str) and plan_raw.strip():
+    if hasattr(plan_raw, "model_dump") and callable(plan_raw.model_dump):
+        plan = plan_raw.model_dump()
+    elif hasattr(plan_raw, "dict") and callable(plan_raw.dict):
+        plan = plan_raw.dict()
+    elif isinstance(plan_raw, str) and plan_raw.strip():
+        try:
             plan = json.loads(plan_raw) or {}
-        elif isinstance(plan_raw, dict):
-            plan = dict(plan_raw)
-    except Exception:
-        plan = {}
+        except Exception:
+            plan = {}
+    elif isinstance(plan_raw, dict):
+        plan = dict(plan_raw)
 
     plan_target = str(plan.get("target_repo") or "").strip()
-    if plan_target.lower() == "owner/repo":  # bare placeholder is not a real target
+    if plan_target.lower() in ("owner/repo", "workspace/repo"):  # bare placeholder is not a real target
         plan_target = ""
 
     owner = str(callback_context.state.get("authorized_github_owner") or "").strip()
     repo = str(callback_context.state.get("authorized_github_repo") or "").strip()
     reviewed_repo = f"{owner}/{repo}" if owner and repo else ""
+
+    if not reviewed_repo:
+        repo_name = str(callback_context.state.get("repo_name") or "").strip()
+        if "/" in repo_name and repo_name.lower() not in ("owner/repo", "workspace/repo"):
+            reviewed_repo = repo_name
 
     effective_target = plan_target or (current_config.github_remediation_repo or "") or reviewed_repo
 
@@ -524,7 +535,7 @@ def _executor_after_callback(callback_context: CallbackContext):
 
 
 def _extract_apply_result(callback_context: CallbackContext) -> dict | None:
-    """Find the most recent github_apply_remediation_plan tool response in events."""
+    """Find the most recent apply_remediation_plan / github_apply_remediation_plan tool response in events."""
     result = None
     session = getattr(callback_context, "session", None)
     events = getattr(session, "events", None) if session else None
@@ -534,15 +545,27 @@ def _extract_apply_result(callback_context: CallbackContext) -> dict | None:
         content = getattr(event, "content", None)
         for part in getattr(content, "parts", None) or []:
             fn_resp = getattr(part, "function_response", None)
-            if not fn_resp or getattr(fn_resp, "name", "") != "github_apply_remediation_plan":
+            if not fn_resp or getattr(fn_resp, "name", "") not in (
+                "github_apply_remediation_plan",
+                "bitbucket_apply_remediation_plan",
+                "apply_remediation_plan",
+            ):
                 continue
             resp = fn_resp.response
             if resp is not None and not isinstance(resp, dict):
-                if hasattr(resp, "model_dump"):
+                if hasattr(resp, "model_dump") and callable(resp.model_dump):
                     resp = resp.model_dump()
-                elif hasattr(resp, "to_dict"):
+                elif hasattr(resp, "to_dict") and callable(resp.to_dict):
                     resp = resp.to_dict()
+                elif hasattr(resp, "dict") and callable(resp.dict):
+                    resp = resp.dict()
             if isinstance(resp, dict):
+                # Unwrap ADK / GenAI standard function response wrappers {"result": {...}}
+                if "result" in resp and isinstance(resp["result"], dict):
+                    resp = resp["result"]
+                elif "output" in resp and isinstance(resp["output"], dict):
+                    resp = resp["output"]
+
                 # Skip guard-blocked responses — the guard returns
                 # {"status": "terminal", "error": "APPLY_ALREADY_RAN"} as a
                 # FunctionResponse when it blocks a repeat call, which also lands
@@ -687,8 +710,17 @@ def _summarize_apply(callback_context: CallbackContext) -> str:
                 lines.append(f"- …and {len(failed) - 10} more")
         lines.append("\nReview the PR before merging.")
         return "\n".join(lines)
-    msg = str(res.get("message") or "no PR was created")
-    return f"❌ **Remediation did not open a PR** — {msg}. See the State tab for details."
+    msg = str(res.get("message") or res.get("error") or "no PR was created")
+    lines = [f"❌ **Remediation did not open a PR** — {msg}."]
+    if failed:
+        lines.append("\n**Failed changes**:")
+        for f in failed[:10]:
+            lines.append(
+                f"- `{f.get('file_path', '?')}` ({f.get('finding_id', '?')}): {f.get('reason', 'unknown')}"
+            )
+        if len(failed) > 10:
+            lines.append(f"- …and {len(failed) - 10} more")
+    return "\n".join(lines)
 
 
 def _executor_before_model_callback(
@@ -722,7 +754,7 @@ def _make_executor(name: str) -> LlmAgent:
         name=name,
         description=(
             "Executes the RemediationPlan: creates a Git branch, commits changed files, "
-            "and opens a GitHub PR via the GitHub API."
+            "and opens a GitHub or Bitbucket PR via the provider APIs."
         ),
         instruction=REMEDIATION_EXECUTOR_PROMPT,
         # Scratch output_key: the after-callback distills this raw text into the clean
@@ -732,7 +764,7 @@ def _make_executor(name: str) -> LlmAgent:
         # every change with exact-match verification, and opens the PR in Python.
         # The LLM no longer fetches/merges/recommits files by hand (the old fragile
         # flow that silently corrupted files on a snippet mismatch).
-        tools=[github_apply_remediation_plan],
+        tools=[apply_remediation_plan, github_apply_remediation_plan, bitbucket_apply_remediation_plan],
         # include_contents defaults to 'all' — required for multi-turn tool calling
         generate_content_config=_cfg.generation_config(_cfg.agent_settings.remediation_temperature),
         before_agent_callback=_executor_before_callback,

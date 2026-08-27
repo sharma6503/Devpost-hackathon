@@ -30,6 +30,9 @@ from ..tools import (
     parse_uploaded_files,
     read_artifact_file,
     run_static_analysis,
+    scan_governance,
+    pull_gcp_skill,
+    list_available_gcp_skills,
     get_model_lifecycle,
     github_get_file_contents,
     github_list_directory_contents,
@@ -37,7 +40,6 @@ from ..tools import (
     github_list_multiple_directories,
     github_get_recursive_tree,
 )
-from ..tools.governance_tools import scan_governance
 from ..utils.mcp_factory import get_adk_docs_toolset, get_github_mcp_toolset
 from ..utils.skill_loader import get_skill_toolset
 from ..utils.tool_guards import block_github_misuse
@@ -76,6 +78,8 @@ _tools = [
     parse_uploaded_files,
     run_static_analysis,
     scan_governance,
+    pull_gcp_skill,
+    list_available_gcp_skills,
     get_model_lifecycle,
     github_get_file_contents,
     github_list_directory_contents,

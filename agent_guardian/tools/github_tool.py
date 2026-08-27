@@ -642,7 +642,6 @@ async def github_create_branch(
             resp.raise_for_status()
             return {"status": "ok", "branch": branch, "base_branch": from_branch, "sha": base_sha}
         except httpx.HTTPStatusError as e:
-            msg = f"HTTP {e.response.status_code} creating branch '{branch}'"
             if e.response.status_code == 422:  # Already exists
                 return {
                     "status": "ok",
@@ -650,6 +649,13 @@ async def github_create_branch(
                     "branch": branch,
                     "base_branch": from_branch,
                 }
+            if e.response.status_code in (401, 403):
+                msg = (
+                    f"GitHub permission error (HTTP {e.response.status_code}): GITHUB_TOKEN lacks "
+                    f"write/push access to '{owner}/{repo}'. Verify your GITHUB_TOKEN has 'repo' / 'contents:write' scope."
+                )
+            else:
+                msg = f"HTTP {e.response.status_code} creating branch '{branch}' on {owner}/{repo}: {e.response.text}"
             logger.error(f"GitHub Branch Error: {msg}")
             return {"status": "error", "message": msg}
         except Exception as e:
@@ -846,8 +852,52 @@ def _normalize_newlines(text: str) -> str:
     return (text or "").replace("\r\n", "\n").replace("\r", "\n")
 
 
+def _validate_syntax(file_path: str, content: str) -> tuple[bool, str | None]:
+    """Verify that generated content is syntactically valid before committing to repository."""
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext == ".py":
+        try:
+            import ast
+
+            ast.parse(content, filename=file_path)
+        except SyntaxError as e:
+            return False, f"Python SyntaxError in {file_path}: {e.msg} (line {e.lineno})"
+    elif ext == ".json":
+        try:
+            json.loads(content)
+        except Exception as e:
+            return False, f"JSON ParseError in {file_path}: {e}"
+    elif ext in (".yaml", ".yml"):
+        try:
+            import yaml
+
+            yaml.safe_load(content)
+        except Exception as e:
+            return False, f"YAML ParseError in {file_path}: {e}"
+    return True, None
+
+
+def _find_normalized_block_match(norm: str, orig: str) -> list[tuple[int, int]]:
+    """Find start and end character indices where normalized lines in orig match in norm."""
+    norm_lines = norm.splitlines(keepends=True)
+    orig_lines = [line.rstrip() for line in orig.splitlines() if line.strip()]
+    if not orig_lines:
+        return []
+
+    matches: list[tuple[int, int]] = []
+    num_orig = len(orig_lines)
+    for i in range(len(norm_lines) - num_orig + 1):
+        window = [norm_lines[i + j].rstrip() for j in range(num_orig)]
+        if all(w == o for w, o in zip(window, orig_lines)):
+            start_pos = sum(len(line) for line in norm_lines[:i])
+            end_pos = sum(len(line) for line in norm_lines[: i + num_orig])
+            matches.append((start_pos, end_pos))
+
+    return matches
+
+
 def _merge_modify(current: str, original_snippet: str | None, replacement_snippet: str | None):
-    """Deterministically apply a single 'modify' change with exact-match verification.
+    """Deterministically apply a single 'modify' change with exact-match and resilient verification.
 
     Returns (merged_content, None) on success, or (None, reason) when the snippet
     is missing, absent, or ambiguous — so the caller can FAIL LOUD rather than
@@ -857,13 +907,26 @@ def _merge_modify(current: str, original_snippet: str | None, replacement_snippe
     if not orig.strip():
         return None, "original_snippet missing/empty for change_type='modify'"
     norm = _normalize_newlines(current)
+    repl = _normalize_newlines(replacement_snippet)
+
+    # 1. Exact match (primary fast path)
     count = norm.count(orig)
-    if count == 0:
-        return None, "original_snippet not found in current file content"
+    if count == 1:
+        merged = norm.replace(orig, repl, 1)
+        return merged, None
     if count > 1:
         return None, f"original_snippet is ambiguous ({count} matches) — refusing to guess"
-    merged = norm.replace(orig, _normalize_newlines(replacement_snippet), 1)
-    return merged, None
+
+    # 2. Resilient line-by-line whitespace-stripped match fallback
+    matches = _find_normalized_block_match(norm, orig)
+    if len(matches) == 1:
+        start_pos, end_pos = matches[0]
+        merged = norm[:start_pos] + repl + norm[end_pos:]
+        return merged, None
+    elif len(matches) > 1:
+        return None, f"original_snippet is ambiguous ({len(matches)} matches) — refusing to guess"
+
+    return None, "original_snippet not found in current file content"
 
 
 async def github_apply_remediation_plan(
@@ -888,15 +951,23 @@ async def github_apply_remediation_plan(
          failed:[{finding_id, file_path, reason}], branch, message}.
     """
     # Resolve the plan from state if not passed (LLM calls this with no args).
-    if plan is None and tool_context is not None:
+    raw = plan
+    if raw is None and tool_context is not None:
         raw = (getattr(tool_context, "state", {}) or {}).get("remediation_plan", "")
-        if isinstance(raw, str) and raw.strip():
-            try:
-                plan = json.loads(raw)
-            except Exception:
-                plan = None
-        elif isinstance(raw, dict):
-            plan = raw
+
+    if hasattr(raw, "model_dump") and callable(raw.model_dump):
+        plan = raw.model_dump()
+    elif hasattr(raw, "dict") and callable(raw.dict):
+        plan = raw.dict()
+    elif isinstance(raw, str) and raw.strip():
+        try:
+            plan = json.loads(raw)
+        except Exception:
+            plan = None
+    elif isinstance(raw, dict):
+        plan = raw
+    else:
+        plan = None
 
     # Check if this is a Bitbucket repository
     is_bitbucket = False
@@ -923,16 +994,44 @@ async def github_apply_remediation_plan(
     if not isinstance(plan, dict):
         return {"status": "error", "message": "No usable remediation plan available.", "committed": [], "failed": []}
 
-    target = str(plan.get("target_repo") or "").strip()
-    if (not owner or not repo) and "/" in target:
-        t_owner, _, t_repo = target.partition("/")
-        owner = owner or t_owner.strip()
-        repo = repo or t_repo.strip()
+    # Resolve target repository owner/repo with fallbacks
+    if not owner or not repo:
+        target = str(plan.get("target_repo") or "").strip()
+        if "/" in target and target.lower() != "owner/repo":
+            t_owner, _, t_repo = target.partition("/")
+            owner = owner or t_owner.strip()
+            repo = repo or t_repo.strip()
+
+    if (not owner or not repo) and tool_context is not None:
+        state = getattr(tool_context, "state", {}) or {}
+        st_owner = str(state.get("authorized_github_owner") or "").strip()
+        st_repo = str(state.get("authorized_github_repo") or "").strip()
+        owner = owner or st_owner
+        repo = repo or st_repo
+        if not owner or not repo:
+            repo_name = str(state.get("repo_name") or "").strip()
+            if "/" in repo_name and repo_name.lower() != "owner/repo":
+                t_owner, _, t_repo = repo_name.partition("/")
+                owner = owner or t_owner.strip()
+                repo = repo or t_repo.strip()
+
+    if not owner or not repo:
+        cfg_repo = str(Config().github_remediation_repo or "").strip()
+        if "/" in cfg_repo and cfg_repo.lower() != "owner/repo":
+            t_owner, _, t_repo = cfg_repo.partition("/")
+            owner = owner or t_owner.strip()
+            repo = repo or t_repo.strip()
+
     base_branch = base_branch or str(plan.get("base_branch") or "main")
     pr_branch = pr_branch or str(plan.get("pr_branch") or "agent_guardian/review")
 
     if not owner or not repo:
-        return {"status": "error", "message": "Could not resolve owner/repo from plan.", "committed": [], "failed": []}
+        return {
+            "status": "error",
+            "message": "Could not resolve repository owner/repo. Ensure a valid GitHub repository URL was analyzed or configured in GITHUB_REMEDIATION_REPO.",
+            "committed": [],
+            "failed": [],
+        }
 
     changes = plan.get("changes", []) or []
 
@@ -968,6 +1067,10 @@ async def github_apply_remediation_plan(
             try:
                 if ctype == "create":
                     content = ch.get("replacement_snippet") or ""
+                    is_valid, syn_err = _validate_syntax(fpath, content)
+                    if not is_valid:
+                        failed.append({"finding_id": fid, "file_path": fpath, "reason": syn_err})
+                        continue
                     # Upsert: if the file already exists on the branch, GitHub
                     # requires its blob sha — a bare create returns 422.
                     try:
@@ -1002,6 +1105,10 @@ async def github_apply_remediation_plan(
                     )
                     if err:
                         failed.append({"finding_id": fid, "file_path": fpath, "reason": err})
+                        continue
+                    is_valid, syn_err = _validate_syntax(fpath, merged)
+                    if not is_valid:
+                        failed.append({"finding_id": fid, "file_path": fpath, "reason": syn_err})
                         continue
                     res = await github_create_or_update_file(
                         owner, repo, fpath, merged, commit_msg, pr_branch, cur.get("sha", "")

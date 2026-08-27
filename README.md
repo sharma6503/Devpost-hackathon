@@ -98,10 +98,12 @@ Agent Guardian features a redesigned visual identity inspired by modern enterpri
 | **Frontend UI** | Next.js 16 (App Router) · React 19 · Tailwind CSS v4 · Framer Motion |
 | **Brand & Design** | Agent Guardian Workspace · Inter Typography · Cobalt/Ice Blue Palette |
 | **Static Analysis** | pyflakes · bandit |
-| **Observability** | OpenTelemetry → Google Cloud Trace · Datadog LLM Observability |
+| **Observability** | OpenTelemetry → Google Cloud Trace (Native ADK Telemetry) |
+| **Artifacts Storage** | Google Cloud Storage (GCS `GcsArtifactService`) · Local `FileArtifactService` |
+| **Session Persistence** | Vertex AI Agent Engine (`agentengine://`) · Local Memory/Filesystem |
 | **SCM Integrations** | GitHub REST API · Bitbucket Cloud REST API |
 | **Rules Sources** | Atlassian Confluence REST v2 + markdownify |
-| **Containerization** | Docker · Cloud Run |
+| **Deployment & CI/CD** | Google Artifact Registry · Google Cloud Run · Vertex AI Agent Engine · Docker |
 
 ---
 
@@ -204,12 +206,23 @@ Create a `.env` file in the root directory:
 ```bash
 # Google Cloud & Vertex AI
 GOOGLE_CLOUD_PROJECT=your-gcp-project-id
-GOOGLE_CLOUD_LOCATION=global
+GOOGLE_CLOUD_LOCATION=us-central1
 
 # Model Settings (Optional - sensible defaults in config.py)
 ROOT_MODEL=gemini-3.1-flash-lite-preview
 EXPERT_MODEL=gemini-3-flash-preview
 GOVERNANCE_MODEL=gemini-3.1-pro-preview
+
+# Observability & Distributed Tracing (Google Cloud Trace via OpenTelemetry)
+ENABLE_CLOUD_TRACING=true
+OTEL_SERVICE_NAME=agent-guardian
+OTEL_SEMCONV_STABILITY_OPT_IN=gen_ai_agent_spans
+OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true
+ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS=true
+
+# Production Artifacts & Session Persistence (GCS & Vertex AI)
+ARTIFACT_SERVICE_URI=gs://agentguardian-prod-artifacts
+SESSION_SERVICE_TYPE=vertexai
 
 # SCM Credentials (Optional for automated PRs)
 GITHUB_TOKEN=ghp_...
@@ -239,6 +252,35 @@ Open [http://localhost:3000](http://localhost:3000) to access the Agent Guardian
 
 ---
 
+## 🚢 Production Deployment
+
+### 1. Build & Push to Google Artifact Registry
+
+```bash
+# Authenticate Docker to Google Artifact Registry
+gcloud auth configure-docker us-central1-docker.pkg.dev
+
+# Build & Push Backend Container
+docker build -t us-central1-docker.pkg.dev/$GOOGLE_CLOUD_PROJECT/agent-guardian/backend:latest .
+docker push us-central1-docker.pkg.dev/$GOOGLE_CLOUD_PROJECT/agent-guardian/backend:latest
+```
+
+### 2. Deploy to Google Cloud Run
+
+```bash
+# Deploy backend service to Cloud Run with GCS Artifacts and Cloud Trace enabled
+make deploy-backend
+```
+
+### 3. Deploy to Vertex AI Agent Engine
+
+```bash
+# Deploy directly to Vertex AI Reasoning Engines (ADK App runtime)
+make deploy-agent-engine
+```
+
+---
+
 ## 🧪 Testing & Verification
 
 ```bash
@@ -256,3 +298,4 @@ make check
 
 ## 📄 License & Support
 For questions, support, or contributions, contact [sharmaasharmaa50@gmail.com]
+

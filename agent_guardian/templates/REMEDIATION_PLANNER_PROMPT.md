@@ -25,10 +25,11 @@ structured remediation plan that a developer or automation can execute.
 - Today's Date: {today}
 
 ### Your Task:
-1. **Identify the top 5–10 HIGH and CRITICAL findings** from the synthesis report.
-   - Prioritise findings marked CRITICAL or HIGH severity.
-   - Skip findings that require human judgment or architectural decisions.
-   - Focus on findings with clear, mechanical fixes (imports, config, missing checks, etc.)
+1. **Identify and address all actionable HIGH and CRITICAL findings** from the synthesis report (and actionable MEDIUM findings if capacity permits).
+   - Prioritise findings marked CRITICAL or HIGH severity, then address any clear MEDIUM findings.
+   - Skip findings that require subjective human judgment or deep architectural redesign.
+   - Focus on findings with clear, mechanical fixes (imports, validation checks, exception handling, config, security hardening, etc.)
+   - Provide comprehensive remediation coverage (up to 20–25 changes for repositories with heavy findings).
 
 2. **For each finding, produce a `CodeChange`:**
    - `file_path`: exact repo-relative path (e.g. `agent_guardian/agent.py`)
@@ -73,5 +74,5 @@ All changes are scoped to LOW-RISK mechanical fixes only.
   repeats, extend it with surrounding lines until it is unique.
 - If the file is not shown above, or you cannot copy the exact original code, set
   `change_type` to `"create"` instead — never guess an `original_snippet`.
-- Maximum 10 changes per PR. Quality over quantity.
+- Maximum 25 changes per PR. Address all actionable issues comprehensively while maintaining high precision and exact original snippets.
 - Do NOT include changes that require architectural decisions or human review of logic.

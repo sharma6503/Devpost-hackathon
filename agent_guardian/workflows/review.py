@@ -305,7 +305,25 @@ async def _ingestion_failed_callback(ctx) -> None:
             "<p>The review could not run. Check repository access and retry.</p>"
             "</body></html>"
         )
-        ctx.state["review_metrics"] = {}
+        ctx.state["review_metrics"] = {
+            "severity": {"critical": 0, "high": 0, "medium": 0, "low": 0},
+            "category": {
+                "adk": 0,
+                "quality": 0,
+                "security": 0,
+                "validation": 0,
+                "governance": 0,
+            },
+            "total": 0,
+            "scores": {
+                "security": 0,
+                "quality": 0,
+                "architecture": 0,
+                "governance": 0,
+                "validation": 0,
+                "overall": 0,
+            },
+        }
         ctx.state["ingestion_error"] = detail
         logger.info("[ingestion_failed_node] Error state written; pipeline terminated cleanly.")
     except Exception as e:

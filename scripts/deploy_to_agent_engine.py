@@ -49,24 +49,19 @@ ENV_VARS_TO_FORWARD = [
     "CONFLUENCE_PAGE_URLS",
     "EVAL_PASS_THRESHOLD",
     "EVAL_MAX_ITERATIONS",
-    # System Config (Aligned with Dockerfile)
+    "ARTIFACT_SERVICE_URI",
+    "ARTIFACT_BUCKET",
+    # System & Cloud Trace Telemetry Config (Google Cloud Trace via OpenTelemetry)
     "NPM_CONFIG_CACHE",
     "UV_CACHE_DIR",
     "PYTHONUNBUFFERED",
+    "ENABLE_CLOUD_TRACING",
+    "OTEL_TO_CLOUD",
+    "OTEL_SERVICE_NAME",
     "GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY",
     "OTEL_SEMCONV_STABILITY_OPT_IN",
     "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT",
     "ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS",
-    # Datadog LLM Observability (read by ddtrace-run at spawn). DD_API_KEY is a secret.
-    "DD_API_KEY",
-    "DD_SITE",
-    "DD_LLMOBS_ENABLED",
-    "DD_LLMOBS_ML_APP",
-    "DD_LLMOBS_AGENTLESS_ENABLED",
-    "DD_APM_TRACING_ENABLED",
-    "DD_SERVICE",
-    "DD_ENV",
-    "DD_VERSION",
 ]
 
 # --- End Configuration ---
@@ -81,16 +76,24 @@ def deploy():
 
     print("Wrapping ADK root_agent with AdkApp...")
     # AdkApp handles ADK-to-ReasoningEngine conversion
-    app = reasoning_engines.AdkApp(agent=root_agent,
-    plugins=[
-        LoggingPlugin(),
-        ReflectAndRetryToolPlugin(max_retries=configs.max_retries),
-        TokenSafetyPlugin(),
-    ])
+    app = reasoning_engines.AdkApp(
+        agent=root_agent,
+        plugins=[
+            LoggingPlugin(),
+            ReflectAndRetryToolPlugin(max_retries=configs.max_retries),
+            TokenSafetyPlugin(),
+        ],
+        enable_tracing=True,
+    )
 
     # Collect env vars from current environment
     env_vars = {var: os.environ.get(var) for var in ENV_VARS_TO_FORWARD if os.environ.get(var)}
 
+    # Ensure Cloud Trace and telemetry are enabled in Agent Engine
+    env_vars.setdefault("ENABLE_CLOUD_TRACING", "true")
+    env_vars.setdefault("GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY", "true")
+    env_vars.setdefault("OTEL_SEMCONV_STABILITY_OPT_IN", "gen_ai_agent_spans")
+    env_vars.setdefault("OTEL_SERVICE_NAME", "agent-guardian")
 
     # Set default caches to /tmp for managed runtime stability (aligned with Dockerfile)
     env_vars.setdefault("NPM_CONFIG_CACHE", "/tmp/.npm")
@@ -106,7 +109,7 @@ def deploy():
     # Pinned to the exact version in uv.lock — the agent code uses ADK 2.x
     # graph Workflow/App APIs that do not exist in 1.x.
     requirements = [
-        "google-adk==2.1.0",
+        "google-adk==2.5.0",
         "httpx>=0.28",
         "google-cloud-aiplatform", # Required for vertexai module during unpickling
         "google-genai",
@@ -122,6 +125,9 @@ def deploy():
         "markdown",
         "markdownify",
         "uvicorn",
+        "opentelemetry-exporter-gcp-trace",
+        "opentelemetry-exporter-otlp-proto-http",
+        "google-cloud-trace",
     ]
 
     print("Defining class methods for Agent Engine...")

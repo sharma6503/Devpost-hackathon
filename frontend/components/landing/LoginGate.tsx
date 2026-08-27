@@ -55,7 +55,7 @@ export function LoginGate({ onSuccess }: LoginGateProps) {
         className="w-full max-w-sm space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-7 shadow-2xl backdrop-blur-xl animate-scale-in text-[var(--color-text-primary)]"
       >
         <div className="text-center flex flex-col items-center">
-          <AgentGuardianLogo size={48} withGlow priority className="mx-auto" />
+          <AgentGuardianLogo size={48} priority className="mx-auto" />
           <h1 className="mt-3.5 text-lg font-headline font-semibold text-[var(--color-text-primary)] tracking-tight">
             Agent Guardian
           </h1>

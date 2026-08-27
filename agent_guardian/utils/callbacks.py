@@ -106,20 +106,65 @@ def _extract_repo_authorization(callback_context: CallbackContext) -> None:
             callback_context.state["authorized_github_ref"] = ref["ref"]
 
 
+_APPROVE_KEYWORDS = {
+    "__ag_approve_remediation__",
+    "approve",
+    "approved",
+    "approve remediation",
+    "approve remediation plan",
+    "approve plan",
+    "yes",
+    "proceed",
+    "apply",
+    "apply fixes",
+    "apply remediation",
+    "lgtm",
+    "generate pr",
+    "create pr",
+    "open pr",
+}
+
+_SKIP_KEYWORDS = {
+    "__ag_skip_remediation__",
+    "skip",
+    "skipped",
+    "skip remediation",
+    "no",
+    "cancel",
+    "cancel remediation",
+    "bypass",
+    "reject",
+}
+
+
 def _apply_hitl_remediation_commands(callback_context: CallbackContext) -> None:
     """Interpret human-in-the-loop remediation approve/skip/commit-id commands."""
-    _cmd = callback_context.state.get("user_request", "").strip()
-    if _cmd == REMEDIATION_APPROVE_CMD:
+    _cmd = str(callback_context.state.get("user_request", "") or "").strip()
+    _cmd_clean = _cmd.strip().lower()
+
+    # Determine if a remediation plan is pending or exists
+    plan_exists = bool(callback_context.state.get("remediation_plan"))
+    status = callback_context.state.get("remediation_status")
+
+    if _cmd == REMEDIATION_APPROVE_CMD or _cmd_clean in _APPROVE_KEYWORDS:
         callback_context.state["remediation_approved"] = True
         callback_context.state["remediation_skipped"] = False
-        logger.info("[constitution_callback] Remediation APPROVED by user.")
-    elif _cmd == REMEDIATION_SKIP_CMD:
+        callback_context.state["remediation_pending_approval"] = False
+        logger.info("[constitution_callback] Remediation APPROVED by user (%s).", _cmd)
+    elif _cmd == REMEDIATION_SKIP_CMD or _cmd_clean in _SKIP_KEYWORDS:
         callback_context.state["remediation_skipped"] = True
         callback_context.state["remediation_approved"] = False
-        logger.info("[constitution_callback] Remediation SKIPPED by user.")
-    elif callback_context.state.get("remediation_approved") and not callback_context.state.get("remediation_commit_id"):
+        callback_context.state["remediation_pending_approval"] = False
+        logger.info("[constitution_callback] Remediation SKIPPED by user (%s).", _cmd)
+    elif (
+        callback_context.state.get("remediation_approved")
+        or status in ("pending_commit_id", "pending_approval")
+    ) and plan_exists:
         if _cmd and not _cmd.startswith("__"):
-            callback_context.state["remediation_commit_id"] = _cmd
+            if _cmd_clean in ("none", "null", "no", "skip", "n/a"):
+                callback_context.state["remediation_commit_id"] = "none"
+            else:
+                callback_context.state["remediation_commit_id"] = _cmd
             callback_context.state["remediation_status"] = "commit_id_provided"
             logger.info(f"[constitution_callback] Set remediation_commit_id = {_cmd}")
 
@@ -208,17 +253,25 @@ def _apply_file_interception(callback_context: CallbackContext):
                             if isinstance(data_bytes, str):
                                 data_bytes = base64.b64decode(data_bytes)
 
-                            upload_dir = Path(".adk/artifacts/uploads")
-                            upload_dir.mkdir(parents=True, exist_ok=True)
+                            max_zip_bytes = configs.max_total_zip_size_kb * 1024
+                            if len(data_bytes) > max_zip_bytes:
+                                logger.warning(
+                                    "Preserving uploaded ZIP aborted: payload exceeds max size (%s > %s bytes)",
+                                    len(data_bytes),
+                                    max_zip_bytes,
+                                )
+                            else:
+                                upload_dir = Path(".adk/artifacts/uploads")
+                                upload_dir.mkdir(parents=True, exist_ok=True)
 
-                            tmp_file = tempfile.NamedTemporaryFile(dir=upload_dir, delete=False, suffix=".zip")
-                            tmp_file.write(data_bytes)
-                            tmp_file.flush()
-                            tmp_file.close()
+                                tmp_file = tempfile.NamedTemporaryFile(dir=upload_dir, delete=False, suffix=".zip")
+                                tmp_file.write(data_bytes)
+                                tmp_file.flush()
+                                tmp_file.close()
 
-                            zip_path_str = str(Path(tmp_file.name).absolute())
-                            callback_context.state["uploaded_zip_path"] = zip_path_str
-                            logger.info(f"Preserved uploaded ZIP to `{zip_path_str}`")
+                                zip_path_str = str(Path(tmp_file.name).absolute())
+                                callback_context.state["uploaded_zip_path"] = zip_path_str
+                                logger.info(f"Preserved uploaded ZIP to `{zip_path_str}`")
                         except Exception as e:
                             logger.error(f"Failed to save ZIP data: {e}")
 
@@ -252,7 +305,47 @@ def _apply_file_interception(callback_context: CallbackContext):
             _filter_parts_in_place(callback_context.user_content.parts)
             request_parts = [p.text for p in callback_context.user_content.parts if hasattr(p, "text") and p.text]
             if request_parts:
-                callback_context.state["user_request"] = "\n".join(request_parts)
+                new_text = "\n".join(request_parts).strip()
+                upper_text = new_text.upper()
+
+                # Handle remediation interactive sentinels
+                if "APPROVE_REMEDIATION" in upper_text or "APPROVE & GENERATE PR" in upper_text or "APPROVE AND GENERATE PR" in upper_text:
+                    callback_context.state["remediation_approved"] = True
+                    logger.info("constitution_callback: remediation approval signal detected.")
+                elif "SKIP_REMEDIATION" in upper_text:
+                    callback_context.state["remediation_skipped"] = True
+                    logger.info("constitution_callback: remediation skip signal detected.")
+
+                # Check if a completed review already exists in state
+                synthesis = callback_context.state.get("synthesis_result", "") or ""
+                has_prior_review = bool(
+                    synthesis
+                    and synthesis.strip()
+                    and not synthesis.startswith("Not provided")
+                    and not synthesis.startswith("[INGESTION_FAILED]")
+                )
+
+                # Check if new_text indicates a new codebase audit
+                is_codebase_input = any([
+                    "github.com/" in new_text.lower(),
+                    "bitbucket.org/" in new_text.lower(),
+                    "gitlab.com/" in new_text.lower(),
+                    callback_context.state.get("uploaded_zip_path") and "[System Note: User attached a ZIP file." in new_text,
+                    new_text.startswith("```") and len(new_text) > 100,
+                ])
+
+                if has_prior_review and not is_codebase_input:
+                    # Conversational follow-up: preserve the reviewed repo and original request
+                    callback_context.state["followup_question"] = new_text
+                    logger.info(f"constitution_callback: routed conversational query to followup_question ({len(new_text)} chars). Preserved user_request.")
+                else:
+                    # New audit request
+                    prev = callback_context.state.get("user_request", "")
+                    if prev and prev != new_text:
+                        callback_context.state["_previous_user_request"] = prev
+                    callback_context.state["user_request"] = new_text
+                    callback_context.state["followup_question"] = ""
+
 
 
 @safe_callback

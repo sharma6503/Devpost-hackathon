@@ -1,8 +1,10 @@
 from __future__ import annotations
+import json
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 from agent_guardian.tools.github_tool import (
     _merge_modify,
+    _validate_syntax,
     github_apply_remediation_plan,
 )
 
@@ -43,6 +45,33 @@ def test_merge_modify_crlf_normalized():
     merged, err = _merge_modify(current, "line2\n", "LINE2\n")
     assert err is None
     assert "LINE2" in merged
+
+
+def test_merge_modify_resilient_whitespace():
+    # File has trailing whitespace on lines, snippet has clean whitespace
+    current = "def add(a, b):   \n    return a + b  \n"
+    snippet = "def add(a, b):\n    return a + b"
+    replacement = "def add(a: int, b: int) -> int:\n    return a + b"
+    merged, err = _merge_modify(current, snippet, replacement)
+    assert err is None
+    assert "def add(a: int, b: int) -> int:" in merged
+
+
+def test_validate_syntax():
+    valid_py = "x = 1\ndef foo(): pass\n"
+    invalid_py = "def foo(:\n"
+    is_valid, err = _validate_syntax("test.py", valid_py)
+    assert is_valid is True
+    assert err is None
+
+    is_valid, err = _validate_syntax("test.py", invalid_py)
+    assert is_valid is False
+    assert "Python SyntaxError" in err
+
+    valid_json = '{"name": "agent"}'
+    invalid_json = '{"name": "agent"'
+    assert _validate_syntax("config.json", valid_json)[0] is True
+    assert _validate_syntax("config.json", invalid_json)[0] is False
 
 
 # ---------------------------------------------------------------------------
@@ -160,7 +189,7 @@ async def test_apply_plan_bitbucket():
                 "finding_id": "A1",
                 "file_path": "a.py",
                 "change_type": "create",
-                "replacement_snippet": "new content",
+                "replacement_snippet": "CONTENT = 'new content'\n",
             },
         ],
     }
@@ -195,8 +224,6 @@ async def test_apply_plan_bitbucket():
 
 @pytest.mark.asyncio
 async def test_apply_plan_bitbucket_on_approve():
-    import json
-
     plan = {
         "target_repo": "imonline/agenticai.agentguardian",
         "pr_branch": "agent_guardian/review",
@@ -205,7 +232,7 @@ async def test_apply_plan_bitbucket_on_approve():
                 "finding_id": "A1",
                 "file_path": "a.py",
                 "change_type": "create",
-                "replacement_snippet": "new content",
+                "replacement_snippet": "CONTENT = 'new content'\n",
             },
         ],
     }
@@ -237,3 +264,93 @@ async def test_apply_plan_bitbucket_on_approve():
     assert res["pr_url"] == "https://bitbucket.org/imonline/agenticai.agentguardian/pull-requests/1"
     assert len(res["committed"]) == 1
     assert res["committed"][0]["finding_id"] == "A1"
+
+
+@pytest.mark.asyncio
+async def test_apply_plan_syntax_error_rejected():
+    plan = {
+        "target_repo": "acme/widget",
+        "base_branch": "main",
+        "pr_branch": "agent_guardian/review",
+        "pr_title": "fix syntax",
+        "pr_body": "fix syntax body",
+        "changes": [
+            {
+                "finding_id": "F-BAD-SYNTAX",
+                "file_path": "src/bad.py",
+                "change_type": "create",
+                "replacement_snippet": "def broken(:\n",
+            },
+        ],
+    }
+    with (
+        patch(f"{_GH}.github_create_branch", new=AsyncMock(return_value={"status": "ok"})),
+        patch(f"{_GH}.github_create_or_update_file", new=AsyncMock(return_value={"status": "ok"})),
+        patch(f"{_GH}.github_create_pull_request", new=AsyncMock(return_value={"status": "ok", "pr_url": "http://pr", "number": 1})),
+    ):
+        res = await github_apply_remediation_plan(plan=plan)
+
+    assert res["status"] == "error"
+    assert len(res["failed"]) == 1
+    assert "Python SyntaxError" in res["failed"][0]["reason"]
+
+
+@pytest.mark.asyncio
+async def test_bitbucket_multiple_modifications_same_file():
+    from agent_guardian.tools.bitbucket_tool import bitbucket_apply_remediation_plan
+
+    plan = {
+        "target_repo": "imonline/agenticai.agentguardian",
+        "base_branch": "main",
+        "pr_branch": "agent_guardian/review",
+        "changes": [
+            {
+                "finding_id": "F1",
+                "file_path": "server.py",
+                "change_type": "modify",
+                "original_snippet": "PORT = 80\n",
+                "replacement_snippet": "PORT = 8080\n",
+            },
+            {
+                "finding_id": "F2",
+                "file_path": "server.py",
+                "change_type": "modify",
+                "original_snippet": "DEBUG = True\n",
+                "replacement_snippet": "DEBUG = False\n",
+            },
+        ],
+    }
+
+    initial_server_py = "PORT = 80\nDEBUG = True\n"
+
+    captured_additions = {}
+
+    async def mock_commit(ws, repo, branch, msg, additions, deletions):
+        nonlocal captured_additions
+        captured_additions = additions
+        return {"status": "ok"}
+
+    _BB = "agent_guardian.tools.bitbucket_tool"
+    with (
+        patch(f"{_BB}.bitbucket_create_branch", new=AsyncMock(return_value={"status": "ok", "base_branch": "main"})),
+        patch(f"{_BB}.bitbucket_commit_files", side_effect=mock_commit),
+        patch(f"{_BB}.bitbucket_create_pull_request", new=AsyncMock(return_value={"status": "ok", "pr_url": "http://pr/1", "number": 1})),
+        patch(f"{_BB}._make_client") as mock_client_cls,
+    ):
+        mock_client = AsyncMock()
+        mock_resp = MagicMock()
+        mock_resp.text = initial_server_py
+        mock_resp.raise_for_status = MagicMock()
+        mock_client.get = AsyncMock(return_value=mock_resp)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+        mock_client_cls.return_value = mock_client
+
+        res = await bitbucket_apply_remediation_plan(plan=plan)
+
+    assert res["status"] == "ok"
+    assert len(res["committed"]) == 2
+    assert "server.py" in captured_additions
+    final_content = captured_additions["server.py"]
+    assert "PORT = 8080\n" in final_content
+    assert "DEBUG = False\n" in final_content

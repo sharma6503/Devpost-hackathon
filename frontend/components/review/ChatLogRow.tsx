@@ -31,6 +31,7 @@ import {
   ArrowRight,
   FolderArchive,
   BookOpen,
+  X,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -245,20 +246,51 @@ export function ChatCodeBlock({ children, className, filename }: { children: any
   );
 }
 
+export function processChildrenWithLineBreaks(children: React.ReactNode): React.ReactNode {
+  return React.Children.map(children, (child) => {
+    if (typeof child === "string") {
+      if (/<br\s*\/?>/i.test(child)) {
+        const parts = child.split(/<br\s*\/?>/gi);
+        return parts.map((part, index) => (
+          <React.Fragment key={index}>
+            {index > 0 && <br className="my-0.5" />}
+            {part}
+          </React.Fragment>
+        ));
+      }
+      return child;
+    }
+    if (React.isValidElement(child) && (child.props as any)?.children) {
+      const isCodeOrPre =
+        child.type === "pre" ||
+        child.type === "code" ||
+        (child.props as any).className?.includes("language-");
+      if (isCodeOrPre) {
+        return child;
+      }
+      return React.cloneElement(child, {
+        ...(child.props as any),
+        children: processChildrenWithLineBreaks((child.props as any).children),
+      });
+    }
+    return child;
+  });
+}
+
 export const chatMarkdownComponents = {
   h1: ({ children }: any) => (
     <h1 className="text-base font-headline font-bold text-black dark:text-white mt-4 mb-2 border-b border-black/10 dark:border-white/10 pb-1 select-text">
-      {children}
+      {processChildrenWithLineBreaks(children)}
     </h1>
   ),
   h2: ({ children }: any) => (
     <h2 className="text-sm font-headline font-semibold text-[#2525A3] dark:text-[#A6C3EE] mt-3.5 mb-1.5 select-text">
-      {children}
+      {processChildrenWithLineBreaks(children)}
     </h2>
   ),
   h3: ({ children }: any) => (
     <h3 className="text-xs font-headline font-semibold text-black dark:text-white mt-3 mb-1 select-text">
-      {children}
+      {processChildrenWithLineBreaks(children)}
     </h3>
   ),
   table: ({ children }: any) => (
@@ -273,11 +305,13 @@ export const chatMarkdownComponents = {
   tr: ({ children }: any) => <tr className="hover:bg-black/[0.02] dark:hover:bg-white/[0.02] transition-colors">{children}</tr>,
   th: ({ children }: any) => (
     <th className="px-3.5 py-2 text-left text-[11px] font-mono font-semibold text-[#737373] dark:text-[#8E8EA0] uppercase tracking-wider whitespace-nowrap">
-      {children}
+      {processChildrenWithLineBreaks(children)}
     </th>
   ),
   td: ({ children }: any) => (
-    <td className="px-3.5 py-2 text-xs text-[#2A2A2A] dark:text-[#ECECF1] align-top leading-relaxed">{children}</td>
+    <td className="px-3.5 py-2 text-xs text-[#2A2A2A] dark:text-[#ECECF1] align-top leading-relaxed">
+      {processChildrenWithLineBreaks(children)}
+    </td>
   ),
   code: ({ children, className }: any) => {
     const isBlock = className?.includes("language-");
@@ -291,7 +325,9 @@ export const chatMarkdownComponents = {
     );
   },
   p: ({ children }: any) => (
-    <p className="text-xs sm:text-[13.5px] text-[#2A2A2A] dark:text-[#ECECF1] font-sans font-normal leading-relaxed mb-2.5 last:mb-0 select-text">{children}</p>
+    <p className="text-xs sm:text-[13.5px] text-[#2A2A2A] dark:text-[#ECECF1] font-sans font-normal leading-relaxed mb-2.5 last:mb-0 select-text">
+      {processChildrenWithLineBreaks(children)}
+    </p>
   ),
   ul: ({ children }: any) => (
     <ul className="list-disc pl-5 my-2 space-y-1 text-xs sm:text-[13px] text-[#2A2A2A] dark:text-[#ECECF1] select-text">{children}</ul>
@@ -299,12 +335,17 @@ export const chatMarkdownComponents = {
   ol: ({ children }: any) => (
     <ol className="list-decimal pl-5 my-2 space-y-1 text-xs sm:text-[13px] text-[#2A2A2A] dark:text-[#ECECF1] select-text">{children}</ol>
   ),
-  li: ({ children }: any) => <li className="leading-relaxed select-text">{children}</li>,
+  li: ({ children }: any) => (
+    <li className="leading-relaxed select-text">
+      {processChildrenWithLineBreaks(children)}
+    </li>
+  ),
   blockquote: ({ children }: any) => (
     <blockquote className="border-l-2 border-[#2525A3] pl-3 my-2 text-xs text-[#737373] dark:text-[#8E8EA0] italic select-text">
-      {children}
+      {processChildrenWithLineBreaks(children)}
     </blockquote>
   ),
+  br: () => <br className="my-0.5" />,
 };
 
 /* ─── Structured Response Type Parsers ─────────────────────────────────────────── */
@@ -503,7 +544,15 @@ function StrategicPlanningCard({ data }: { data: any }) {
 
 /* ─── 2. Structured Remediation Pull Request Card Component ─────────────────────── */
 
-function RemediationPlanCard({ data }: { data: any }) {
+function RemediationPlanCard({
+  data,
+  onApprove,
+  onSkip,
+}: {
+  data: any;
+  onApprove?: () => void;
+  onSkip?: () => void;
+}) {
   const [expandedFiles, setExpandedFiles] = useState<Record<number, boolean>>({ 0: true });
   const changes: any[] = Array.isArray(data.changes) ? data.changes : [];
 
@@ -634,6 +683,38 @@ function RemediationPlanCard({ data }: { data: any }) {
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {/* Embedded Action Approval / Skip Controls */}
+      {(onApprove || onSkip) && (
+        <div className="pt-3 border-t border-[#2525A3]/15 flex flex-wrap items-center justify-between gap-3 select-none">
+          <div className="flex items-center gap-2 text-xs text-[#555] dark:text-[#A0A0B0] font-sans">
+            <Wrench className="w-4 h-4 text-amber-500 shrink-0" />
+            <span>Review proposed AST-verified code patches above before automated branch push.</span>
+          </div>
+          <div className="flex items-center gap-2.5">
+            {onApprove && (
+              <button
+                type="button"
+                onClick={onApprove}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#2525A3] hover:bg-[#1E1E88] text-white text-xs font-headline font-bold uppercase tracking-wider shadow-md transition-all cursor-pointer"
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>Approve &amp; Generate PR</span>
+              </button>
+            )}
+            {onSkip && (
+              <button
+                type="button"
+                onClick={onSkip}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl border border-black/15 dark:border-white/15 hover:bg-black/5 dark:hover:bg-white/5 text-slate-700 dark:text-slate-300 text-xs font-headline font-bold uppercase tracking-wider transition-all cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+                <span>Skip Remediation</span>
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -980,6 +1061,8 @@ export interface ChatLogRowProps {
   isStreaming?: boolean;
   onInspectDelta?: (event: AdkEvent) => void;
   onInspectEvent?: (event: AdkEvent) => void;
+  onApproveRemediation?: () => void;
+  onSkipRemediation?: () => void;
 }
 
 export function ChatLogRow({
@@ -991,6 +1074,8 @@ export function ChatLogRow({
   isStreaming = false,
   onInspectDelta,
   onInspectEvent,
+  onApproveRemediation,
+  onSkipRemediation,
 }: ChatLogRowProps) {
   const [copied, setCopied] = useState(false);
   const [feedback, setFeedback] = useState<"up" | "down" | null>(null);
@@ -999,6 +1084,12 @@ export function ChatLogRow({
   const rawContent = entry?.text || body || "";
   const currentTurn = turn ?? 1;
   const isUser = rawAuthor === "user" || rawAuthor === "Operator" || rawAuthor === "USER";
+
+  const isPendingRemediationApproval =
+    !isUser &&
+    (rawContent.includes("Remediation execution is pending user approval") ||
+      rawContent.includes("pending user approval") ||
+      Boolean(entry?.stateDelta && (entry.stateDelta as Record<string, unknown>).remediation_status === "pending_approval"));
 
   const currentEvent =
     entry?.rawEvent ||
@@ -1099,7 +1190,11 @@ export function ChatLogRow({
         ) : structured?.type === "planning" ? (
           <StrategicPlanningCard data={structured.data} />
         ) : structured?.type === "remediation" ? (
-          <RemediationPlanCard data={structured.data} />
+          <RemediationPlanCard
+            data={structured.data}
+            onApprove={onApproveRemediation}
+            onSkip={onSkipRemediation}
+          />
         ) : structured?.type === "evaluation" ? (
           <EvaluationReportCard data={structured.data} />
         ) : (

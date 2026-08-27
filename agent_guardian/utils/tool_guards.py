@@ -195,7 +195,11 @@ def block_github_wrong_repo(tool, args, tool_context):
 # dict (never a raised exception), nothing in ADK's retry plumbing bounds the
 # re-calls. This guard caps it at one call per invocation so a failing apply can't
 # spin the executor into an unbounded model↔tool loop.
-_CALL_ONCE_TOOLS = ("github_apply_remediation_plan",)
+_CALL_ONCE_TOOLS = (
+    "github_apply_remediation_plan",
+    "bitbucket_apply_remediation_plan",
+    "apply_remediation_plan",
+)
 
 
 def block_apply_remediation_replay(tool, args, tool_context):

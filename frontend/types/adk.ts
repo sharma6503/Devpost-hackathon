@@ -76,11 +76,15 @@ export interface Session {
 
 export interface ReviewState {
   user_request: string;
+  _previous_user_request?: string;
   /** Login-captured caller identity, seeded into session state at creation.
    * Session-constant (preserved across per-review resets) and surfaced in
    * telemetry; user-claimed, not an auth assertion. */
   user_department?: string;
   user_country?: string;
+  followup_question?: string;
+  followup_answer?: string;
+  uploaded_zip_path?: string;
   raw_codebase: string;
   code_logic: string;
   code_config: string;
@@ -90,6 +94,12 @@ export interface ReviewState {
   logic_file_count: number;
   total_file_count: number;
   confluence_rules: string;
+  confluence_pages_index?: string;
+  confluence_host_map_json?: string;
+  retrieved_gcp_skills?: Array<{ name: string; description?: string; content?: string }>;
+  gcp_skills?: string[];
+  skills?: string[];
+  skill_search_queries?: string[];
   review_plan: string;
   governance_review_result: string;
   adk_review_result: string;
@@ -117,6 +127,7 @@ export interface ReviewState {
   remediation_pending_approval?: boolean;
   /** Markdown summary of the proposed PR, shown while pending approval. */
   remediation_plan_summary?: string;
+  remediation_failed_changes?: Array<{ file_path?: string; finding_id?: string; reason?: string }>;
 }
 
 /** Actual shape written by metrics_agent.py */

@@ -44,6 +44,47 @@ async def test_login_rejects_bad_credentials(api_app, monkeypatch):
         assert "username" not in resp.text.lower() or "invalid" in resp.text.lower()
 
 
+@pytest.mark.asyncio
+async def test_security_headers_present(api_app):
+    import httpx
+
+    transport = httpx.ASGITransport(app=api_app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/healthz")
+        assert resp.status_code == 200
+        assert resp.headers.get("X-Content-Type-Options") == "nosniff"
+        assert resp.headers.get("X-Frame-Options") == "DENY"
+        assert resp.headers.get("X-XSS-Protection") == "1; mode=block"
+        assert resp.headers.get("Referrer-Policy") == "strict-origin-when-cross-origin"
+
+
+@pytest.mark.asyncio
+async def test_login_rate_limiting(api_app, monkeypatch):
+    import httpx
+    import agent_guardian.auth as auth
+    from api.main import _FAILED_LOGINS
+
+    _FAILED_LOGINS.clear()
+    monkeypatch.setattr(auth, "verify_credentials", lambda username, password: None)
+
+    transport = httpx.ASGITransport(app=api_app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        # Trigger 9 failed attempts
+        for _ in range(9):
+            r = await client.post("/auth/login", json={"username": "jdoe", "password": "bad"})
+            assert r.status_code == 401
+
+        # 10th failed attempt
+        r10 = await client.post("/auth/login", json={"username": "jdoe", "password": "bad"})
+        assert r10.status_code == 401
+
+        # 11th attempt is rate limited with 429
+        r11 = await client.post("/auth/login", json={"username": "jdoe", "password": "bad"})
+        assert r11.status_code == 429
+        assert "Too many failed login attempts" in r11.json().get("detail", "")
+    _FAILED_LOGINS.clear()
+
+
 def test_hash_password_is_not_reversible_encoding():
     from agent_guardian.auth import hash_password
     import bcrypt

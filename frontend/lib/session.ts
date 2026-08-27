@@ -206,14 +206,20 @@ export function removeSession(sessionId: string): void {
 export interface SessionViewCache {
   logs: Array<Omit<LogEntry, "rawEvent">>;
   phases: PipelinePhase[];
+  state?: Record<string, unknown>;
   cachedAt: number;
 }
 
-export function cacheSessionView(sessionId: string, logs: LogEntry[], phases: PipelinePhase[]): void {
+export function cacheSessionView(
+  sessionId: string,
+  logs: LogEntry[],
+  phases: PipelinePhase[],
+  state?: Record<string, unknown>
+): void {
   if (typeof window === "undefined") return;
   try {
     const stripped = logs.map(({ rawEvent: _raw, ...rest }) => rest);
-    const payload = JSON.stringify({ logs: stripped, phases, cachedAt: Date.now() });
+    const payload = JSON.stringify({ logs: stripped, phases, state, cachedAt: Date.now() });
     if (payload.length > MAX_CACHE_BYTES) return;
     localStorage.setItem(`${SESSION_CACHE_PREFIX}${sessionId}`, payload);
   } catch {

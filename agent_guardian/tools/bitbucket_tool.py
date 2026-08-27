@@ -417,30 +417,55 @@ async def bitbucket_apply_remediation_plan(
     """Deterministically apply a RemediationPlan and open a Bitbucket PR — no LLM merging."""
     import json
 
-    if plan is None and tool_context is not None:
+    raw = plan
+    if raw is None and tool_context is not None:
         raw = (getattr(tool_context, "state", {}) or {}).get("remediation_plan", "")
-        if isinstance(raw, str) and raw.strip():
-            try:
-                plan = json.loads(raw)
-            except Exception:
-                plan = None
-        elif isinstance(raw, dict):
-            plan = raw
+
+    if hasattr(raw, "model_dump") and callable(raw.model_dump):
+        plan = raw.model_dump()
+    elif hasattr(raw, "dict") and callable(raw.dict):
+        plan = raw.dict()
+    elif isinstance(raw, str) and raw.strip():
+        try:
+            plan = json.loads(raw)
+        except Exception:
+            plan = None
+    elif isinstance(raw, dict):
+        plan = raw
+    else:
+        plan = None
+
     if not isinstance(plan, dict):
         return {"status": "error", "message": "No usable remediation plan available.", "committed": [], "failed": []}
 
-    target = str(plan.get("target_repo") or "").strip()
-    if (not workspace or not repo_slug) and "/" in target:
-        t_workspace, _, t_repo_slug = target.partition("/")
-        workspace = workspace or t_workspace.strip()
-        repo_slug = repo_slug or t_repo_slug.strip()
+    # Resolve workspace and repo_slug with fallbacks
+    if not workspace or not repo_slug:
+        target = str(plan.get("target_repo") or "").strip()
+        if "/" in target and target.lower() != "workspace/repo":
+            t_workspace, _, t_repo_slug = target.partition("/")
+            workspace = workspace or t_workspace.strip()
+            repo_slug = repo_slug or t_repo_slug.strip()
+
+    if (not workspace or not repo_slug) and tool_context is not None:
+        state = getattr(tool_context, "state", {}) or {}
+        st_ws = str(state.get("authorized_bitbucket_workspace") or state.get("bitbucket_workspace") or "").strip()
+        st_slug = str(state.get("authorized_bitbucket_repo_slug") or state.get("bitbucket_repo_slug") or "").strip()
+        workspace = workspace or st_ws
+        repo_slug = repo_slug or st_slug
+        if not workspace or not repo_slug:
+            repo_name = str(state.get("repo_name") or "").strip()
+            if "/" in repo_name and repo_name.lower() != "workspace/repo":
+                t_ws, _, t_slug = repo_name.partition("/")
+                workspace = workspace or t_ws.strip()
+                repo_slug = repo_slug or t_slug.strip()
+
     base_branch = base_branch or str(plan.get("base_branch") or "main")
     pr_branch = pr_branch or str(plan.get("pr_branch") or "agent_guardian/review")
 
     if not workspace or not repo_slug:
         return {
             "status": "error",
-            "message": "Could not resolve workspace/repo_slug from plan.",
+            "message": "Could not resolve Bitbucket workspace/repo_slug from plan or state.",
             "committed": [],
             "failed": [],
         }
@@ -464,7 +489,7 @@ async def bitbucket_apply_remediation_plan(
     deletions: list[str] = []
 
     # Import helper logic from github_tool
-    from .github_tool import _merge_modify
+    from .github_tool import _merge_modify, _validate_syntax
 
     async with _make_client() as client:
         for ch in changes:
@@ -479,29 +504,41 @@ async def bitbucket_apply_remediation_plan(
             try:
                 if ctype == "create":
                     content = ch.get("replacement_snippet") or ""
+                    is_valid, syn_err = _validate_syntax(fpath, content)
+                    if not is_valid:
+                        failed.append({"finding_id": fid, "file_path": fpath, "reason": syn_err})
+                        continue
                     additions_and_modifications[fpath] = content
                     committed.append({"finding_id": fid, "file_path": fpath, "change_type": ctype})
                 elif ctype == "delete":
                     deletions.append(fpath)
                     committed.append({"finding_id": fid, "file_path": fpath, "change_type": ctype})
                 else:  # modify
-                    try:
-                        url = f"{_BB_BASE}/repositories/{workspace}/{repo_slug}/src/{base_branch}/{fpath}"
-                        resp = await client.get(url, timeout=20)
-                        resp.raise_for_status()
-                        cur_content = resp.text
-                    except Exception as fe:
-                        failed.append(
-                            {
-                                "finding_id": fid,
-                                "file_path": fpath,
-                                "reason": f"could not fetch file: {fe.__class__.__name__}",
-                            }
-                        )
-                        continue
+                    # If this file was already created or modified in this same plan batch, chain off the in-memory content
+                    if fpath in additions_and_modifications:
+                        cur_content = additions_and_modifications[fpath]
+                    else:
+                        try:
+                            url = f"{_BB_BASE}/repositories/{workspace}/{repo_slug}/src/{base_branch}/{fpath}"
+                            resp = await client.get(url, timeout=20)
+                            resp.raise_for_status()
+                            cur_content = resp.text
+                        except Exception as fe:
+                            failed.append(
+                                {
+                                    "finding_id": fid,
+                                    "file_path": fpath,
+                                    "reason": f"could not fetch file: {fe.__class__.__name__}",
+                                }
+                            )
+                            continue
                     merged, err = _merge_modify(cur_content, ch.get("original_snippet"), ch.get("replacement_snippet"))
                     if err:
                         failed.append({"finding_id": fid, "file_path": fpath, "reason": err})
+                        continue
+                    is_valid, syn_err = _validate_syntax(fpath, merged)
+                    if not is_valid:
+                        failed.append({"finding_id": fid, "file_path": fpath, "reason": syn_err})
                         continue
                     additions_and_modifications[fpath] = merged
                     committed.append({"finding_id": fid, "file_path": fpath, "change_type": ctype})

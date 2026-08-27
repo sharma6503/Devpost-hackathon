@@ -158,6 +158,20 @@ class Config(BaseModel):
     max_concurrency: int = Field(default_factory=lambda: _env_int("MAX_CONCURRENCY", 2))
     max_retries: int = Field(default_factory=lambda: _env_int("MAX_RETRIES", 5))
 
+    # Persistence: Artifacts & Sessions (Production GCS & Vertex AI Agent Engine)
+    artifact_service_uri: str | None = Field(default_factory=lambda: os.environ.get("ARTIFACT_SERVICE_URI"))
+    artifact_bucket: str | None = Field(default_factory=lambda: os.environ.get("ARTIFACT_BUCKET"))
+    session_service_uri: str | None = Field(default_factory=lambda: os.environ.get("SESSION_SERVICE_URI"))
+    session_service_type: str | None = Field(default_factory=lambda: os.environ.get("SESSION_SERVICE_TYPE"))
+
+    # Observability & Cloud Tracing (Google Cloud Trace via OpenTelemetry)
+    enable_cloud_tracing: bool = Field(
+        default_factory=lambda: os.environ.get("ENABLE_CLOUD_TRACING", "false").lower() in ("1", "true", "yes", "on")
+    )
+    otel_service_name: str = Field(
+        default_factory=lambda: os.environ.get("OTEL_SERVICE_NAME", "agent-guardian")
+    )
+
     def generation_config(self, temperature: float | None = None):
         """safety_config plus an optional task-tuned sampling temperature."""
         cfg = self.safety_config

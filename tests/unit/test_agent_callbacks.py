@@ -450,3 +450,41 @@ def test_guard_blocks_wrong_repo_when_authorized():
 
     assert result is not None
     assert result["error"] == "UNAUTHORIZED_REPO"
+
+
+@pytest.mark.parametrize("approve_word", ["approve", "approved", "yes", "proceed", "apply fixes", "__AG_APPROVE_REMEDIATION__"])
+def test_apply_hitl_remediation_commands_approve(mock_callback_context, approve_word):
+    from agent_guardian.utils.callbacks import _apply_hitl_remediation_commands
+
+    mock_callback_context.state["user_request"] = approve_word
+    mock_callback_context.state["remediation_plan"] = '{"pr_title": "Fix"}'
+    _apply_hitl_remediation_commands(mock_callback_context)
+
+    assert mock_callback_context.state["remediation_approved"] is True
+    assert mock_callback_context.state["remediation_skipped"] is False
+    assert mock_callback_context.state["remediation_pending_approval"] is False
+
+
+@pytest.mark.parametrize("skip_word", ["skip", "cancel", "no", "reject", "__AG_SKIP_REMEDIATION__"])
+def test_apply_hitl_remediation_commands_skip(mock_callback_context, skip_word):
+    from agent_guardian.utils.callbacks import _apply_hitl_remediation_commands
+
+    mock_callback_context.state["user_request"] = skip_word
+    mock_callback_context.state["remediation_plan"] = '{"pr_title": "Fix"}'
+    _apply_hitl_remediation_commands(mock_callback_context)
+
+    assert mock_callback_context.state["remediation_skipped"] is True
+    assert mock_callback_context.state["remediation_approved"] is False
+
+
+def test_apply_hitl_remediation_commands_commit_id(mock_callback_context):
+    from agent_guardian.utils.callbacks import _apply_hitl_remediation_commands
+
+    mock_callback_context.state["user_request"] = "EA-1234"
+    mock_callback_context.state["remediation_plan"] = '{"pr_title": "Fix"}'
+    mock_callback_context.state["remediation_status"] = "pending_commit_id"
+    _apply_hitl_remediation_commands(mock_callback_context)
+
+    assert mock_callback_context.state["remediation_commit_id"] == "EA-1234"
+    assert mock_callback_context.state["remediation_status"] == "commit_id_provided"
+

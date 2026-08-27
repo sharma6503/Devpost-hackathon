@@ -178,16 +178,30 @@ async def synthesis_budget_callback(callback_context: CallbackContext):
         else:
             high = mid - 1
 
-    # Apply the optimal cap to truncate oversized keys
+    # Apply the optimal cap to truncate oversized keys while preserving canonical full content
     for key, size in list(sizes.items()):
         if size > opt_cap:
             val = callback_context.state.get(key)
             if isinstance(val, str):
+                canonical_key = f"_canonical_{key}"
+                if canonical_key not in callback_context.state:
+                    callback_context.state[canonical_key] = val
                 callback_context.state[key] = val[:opt_cap] + "\n\n[TRUNCATED BY SYNTHESIS_BUDGET_CALLBACK]"
                 sizes[key] = opt_cap
 
     new_total = sum(sizes.values())
-    logger.info(f"Truncated injected state to {new_total} chars (per-key cap={opt_cap}).")
+    logger.info(f"Truncated injected state to {new_total} chars (per-key cap={opt_cap}). Preserved canonical copies in state.")
+
+
+def get_canonical_state(state: Any, key: str) -> Any:
+    """Retrieve the un-truncated canonical value for a state key if preserved,
+    otherwise returns state.get(key)."""
+    if state is None:
+        return None
+    canonical_key = f"_canonical_{key}"
+    if hasattr(state, "get"):
+        return state.get(canonical_key) or state.get(key)
+    return None
 
 
 def _measure_part(part) -> int:

@@ -14,7 +14,12 @@ _TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
 
 
 def load_prompt(name: str) -> str:
-    with open(os.path.join(_TEMPLATES_DIR, f"{name}.md"), "r", encoding="utf-8") as f:
+    if name not in _PROMPT_NAMES:
+        raise ValueError(f"Invalid prompt name requested: {name}")
+    target_path = os.path.abspath(os.path.join(_TEMPLATES_DIR, f"{name}.md"))
+    if not target_path.startswith(os.path.abspath(_TEMPLATES_DIR)):
+        raise ValueError(f"Prompt path traversal detected for: {name}")
+    with open(target_path, "r", encoding="utf-8") as f:
         return f.read()
 
 

@@ -13,7 +13,7 @@ export default function ResultsRedirectPage({
 
   useEffect(() => {
     if (sessionId) {
-      router.replace(`/?session=${encodeURIComponent(sessionId)}`);
+      router.replace(`/?sessionId=${encodeURIComponent(sessionId)}`);
     }
   }, [sessionId, router]);
 

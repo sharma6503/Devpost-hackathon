@@ -388,3 +388,143 @@ async def test_merge_local_skills_workflow_callback():
         ]
 
 
+@pytest.mark.asyncio
+async def test_pull_gcp_skill_tool_success():
+    """Verify pull_gcp_skill tool retrieves skill instructions and formats output."""
+    from agent_guardian.tools.gcp_skill_tool import pull_gcp_skill
+
+    mock_skill = MagicMock(spec=Skill)
+    mock_skill.name = "agent-platform-prompt-management"
+    mock_skill.description = "Enterprise prompt governance standard"
+    mock_skill.instructions = "# Prompt Rules\nAlways version prompts."
+    mock_res = MagicMock()
+    mock_res.list_references.return_value = ["references/create.md"]
+    mock_res.list_assets.return_value = []
+    mock_res.get_reference.return_value = "# Reference Documentation"
+    mock_skill.resources = mock_res
+
+    with patch("agent_guardian.tools.gcp_skill_tool.fetch_skill_by_name", new_callable=AsyncMock) as mock_fetch:
+        mock_fetch.return_value = mock_skill
+
+        result = await pull_gcp_skill("agent-platform-prompt-management", include_resources=True)
+        assert result["status"] == "success"
+        assert result["skill_name"] == "agent-platform-prompt-management"
+        assert "Always version prompts" in result["instructions"]
+        assert "references/create.md" in result["resources"]
+        assert result["resources"]["references/create.md"] == "# Reference Documentation"
+        assert "Successfully pulled GCP skill" in result["message"]
+
+
+@pytest.mark.asyncio
+async def test_pull_gcp_skill_tool_not_found():
+    """Verify pull_gcp_skill tool returns error when skill is missing."""
+    from agent_guardian.tools.gcp_skill_tool import pull_gcp_skill
+
+    with patch("agent_guardian.tools.gcp_skill_tool.fetch_skill_by_name", new_callable=AsyncMock) as mock_fetch:
+        mock_fetch.return_value = None
+
+        result = await pull_gcp_skill("non-existent-skill")
+        assert result["status"] == "error"
+        assert "was not found" in result["message"]
+
+    # Empty name check
+    empty_result = await pull_gcp_skill("")
+    assert empty_result["status"] == "error"
+    assert "No skill name provided" in empty_result["message"]
+
+
+@pytest.mark.asyncio
+async def test_pull_gcp_skill_tool_state_update():
+    """Verify pull_gcp_skill tool updates session state and merges confluence_rules."""
+    from agent_guardian.tools.gcp_skill_tool import pull_gcp_skill
+
+    mock_skill = MagicMock(spec=Skill)
+    mock_skill.name = "gke-cost-optimization"
+    mock_skill.description = "GKE cost optimization rules"
+    mock_skill.instructions = "Use spot instances."
+    mock_skill.resources = None
+
+    mock_context = MagicMock()
+    mock_context.state = {
+        "confluence_rules": "Existing Policy",
+        "pulled_gcp_skills": [],
+    }
+
+    with patch("agent_guardian.tools.gcp_skill_tool.fetch_skill_by_name", new_callable=AsyncMock) as mock_fetch:
+        mock_fetch.return_value = mock_skill
+
+        result = await pull_gcp_skill("gke-cost-optimization", tool_context=mock_context)
+        assert result["status"] == "success"
+        assert "gke-cost-optimization" in mock_context.state["pulled_gcp_skills"]
+        assert "Existing Policy" in mock_context.state["confluence_rules"]
+        assert "gke-cost-optimization" in mock_context.state["confluence_rules"]
+
+
+@pytest.mark.asyncio
+async def test_list_available_gcp_skills_tool():
+    """Verify list_available_gcp_skills tool queries the registry."""
+    from agent_guardian.tools.gcp_skill_tool import list_available_gcp_skills
+
+    mock_fm = MagicMock(spec=Frontmatter)
+    mock_fm.name = "agent-platform-inference"
+    mock_fm.description = "Inference optimization guidelines"
+
+    mock_reg = MagicMock()
+    mock_reg.search_skills = AsyncMock(return_value=[mock_fm])
+
+    with patch("agent_guardian.tools.gcp_skill_tool.get_gcp_skill_registry", return_value=mock_reg):
+        res = await list_available_gcp_skills(query="inference")
+        assert res["status"] == "success"
+        assert res["total_skills"] == 1
+        assert res["skills"][0]["name"] == "agent-platform-inference"
+
+
+@pytest.mark.asyncio
+async def test_pull_multiple_gcp_skills_tool():
+    """Verify pull_multiple_gcp_skills tool handles list and comma-separated inputs."""
+    from agent_guardian.tools.gcp_skill_tool import pull_multiple_gcp_skills
+
+    mock_skill1 = MagicMock(spec=Skill)
+    mock_skill1.name = "skill-one"
+    mock_skill1.description = "First skill"
+    mock_skill1.instructions = "Rule 1"
+    mock_skill1.resources = None
+
+    mock_skill2 = MagicMock(spec=Skill)
+    mock_skill2.name = "skill-two"
+    mock_skill2.description = "Second skill"
+    mock_skill2.instructions = "Rule 2"
+    mock_skill2.resources = None
+
+    async def _mock_fetch(name, **kwargs):
+        if name == "skill-one":
+            return mock_skill1
+        if name == "skill-two":
+            return mock_skill2
+        return None
+
+    with patch("agent_guardian.tools.gcp_skill_tool.fetch_skill_by_name", side_effect=_mock_fetch):
+        # Comma-separated string
+        res = await pull_multiple_gcp_skills("skill-one, skill-two")
+        assert res["status"] == "success"
+        assert res["loaded_count"] == 2
+        assert len(res["skills"]) == 2
+        assert "### Skill: skill-one" in res["compiled_rules"]
+        assert "### Skill: skill-two" in res["compiled_rules"]
+
+
+def test_gcp_skill_tools_in_agent_and_experts():
+    """Verify pull_gcp_skill and list_available_gcp_skills are registered in root_agent, expert factory, and followup."""
+    from agent_guardian.tools.gcp_skill_tool import pull_gcp_skill, list_available_gcp_skills
+    from agent_guardian.sub_agents._expert_factory import get_base_tools
+    from agent_guardian.sub_agents.followup_agent import _tools as followup_tools
+
+    base_tools = get_base_tools()
+    assert pull_gcp_skill in base_tools
+    assert list_available_gcp_skills in base_tools
+
+    assert pull_gcp_skill in followup_tools
+    assert list_available_gcp_skills in followup_tools
+
+
+

@@ -33,11 +33,9 @@ export function AgentGuardianLogo({
   const pixelSize = typeof size === "number" ? size : (SIZE_MAP[size] ?? 32);
 
   return (
-    <div className={`inline-flex items-center gap-2.5 shrink-0 ${className}`}>
+    <div className={`inline-flex items-center gap-2.5 shrink-0 group ${className}`}>
       <div
-        className={`relative flex items-center justify-center rounded-xl overflow-hidden shrink-0 ${
-          withGlow ? "shadow-lg shadow-[#2525A3]/25" : ""
-        }`}
+        className="relative flex items-center justify-center shrink-0 transition-transform duration-300 group-hover:scale-105"
         style={{ width: pixelSize, height: pixelSize }}
       >
         <Image
@@ -46,11 +44,8 @@ export function AgentGuardianLogo({
           width={pixelSize * 2}
           height={pixelSize * 2}
           priority={priority}
-          className="w-full h-full object-contain rounded-xl select-none"
+          className="w-full h-full object-contain select-none transition-all duration-300"
         />
-        {withGlow && (
-          <div className="absolute inset-0 rounded-xl bg-[#2525A3]/20 animate-pulse pointer-events-none" />
-        )}
       </div>
 
       {showText && (

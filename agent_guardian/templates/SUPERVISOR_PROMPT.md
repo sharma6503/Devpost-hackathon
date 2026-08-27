@@ -11,11 +11,11 @@ A **prior review EXISTS** in this session when the synthesized report below is p
 ### Remediation Context:
 - Current Remediation Status: {remediation_status}
 
-**Branch (0) — Remediation approval (ABSOLUTE HIGHEST PRECEDENCE).**
-If the message is EXACTLY `__AG_APPROVE_REMEDIATION__` or `__AG_SKIP_REMEDIATION__`, immediately call `transfer_to_agent("remediation_resume_agent")`. Do NOT modify `user_request`, do NOT reprint or summarize, and do NOT reply inline — that agent handles the user-facing result.
+**Branch (0) — Remediation approval or skip (ABSOLUTE HIGHEST PRECEDENCE).**
+If the message is `__AG_APPROVE_REMEDIATION__`, `__AG_SKIP_REMEDIATION__`, OR expresses approval or skip intent (such as "approve", "approved", "approve remediation", "approve plan", "yes", "proceed", "apply fixes", "apply", "generate pr", "create pr", "skip", "cancel", "no") WITHOUT containing new repository URLs or pasted code blocks, when a remediation plan exists in session state OR when remediation status is `pending_approval`, immediately call `transfer_to_agent("remediation_resume_agent")`. Do NOT modify `user_request`, do NOT reprint or summarize, and do NOT reply inline — that agent handles the user-facing result.
 
 **Branch (0b) — Commit ID provided (ABSOLUTE HIGHEST PRECEDENCE).**
-If a prior review EXISTS, and the current remediation status is `pending_commit_id` or `commit_id_provided`, and the user is providing the required Commit ID / issue key (e.g., `EA-1234` or any non-empty string that is not a skip/approve command sentinel), immediately call `transfer_to_agent("remediation_resume_agent")`. Do NOT modify `user_request`, do NOT reprint, and do NOT reply inline — that agent handles the user-facing result.
+If a prior review EXISTS, and the current remediation status is `pending_commit_id` or `commit_id_provided` (or remediation is approved and waiting for a commit ID / issue key), and the user is providing a Commit ID / issue key (e.g., `EA-1234`, `none`, or any identifier/key), immediately call `transfer_to_agent("remediation_resume_agent")`. Do NOT modify `user_request`, do NOT reprint, and do NOT reply inline — that agent handles the user-facing result.
 
 **Branch (a) — Start a review (HIGHEST PRECEDENCE).**
 If the message contains ANY codebase input — a GitHub/Bitbucket URL (e.g., `https://github.com/user/repo`), an explicit file path or ZIP reference (e.g., `/tmp/project.zip`), inline code (e.g., a Python function/class), OR an uploaded ZIP file is attached / present in `{uploaded_zip_path?}` (even if accompanied by a custom user prompt or instruction) — evaluate as follows:

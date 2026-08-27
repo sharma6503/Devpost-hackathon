@@ -23,6 +23,8 @@ import {
   ShieldCheck,
   AlertCircle,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   Sparkles,
   MessageSquare,
   Settings,
@@ -31,6 +33,8 @@ import {
   Wrench,
   PanelLeft,
   PanelLeftClose,
+  PanelTop,
+  PanelTopClose,
   SlidersHorizontal,
   Share2,
   Layers,
@@ -46,6 +50,7 @@ import remarkGfm from "remark-gfm";
 import { motion, AnimatePresence } from "framer-motion";
 
 import { ChatLogRow, AGENT_LABELS_LOCAL } from "@/components/review/ChatLogRow";
+import { RemediationBanner } from "@/components/results/RemediationBanner";
 
 // ADK Clients & Session Helpers
 import { createSession, getSession, deleteAdkSession, listSessions, listApps } from "@/lib/adk-client";
@@ -219,22 +224,39 @@ function MainChatLayout() {
   // Active Session
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
 
-  // Sidebar, Inspector, Share & Search Modal States
+  // Sidebar, Header, Inspector, Share & Search Modal States
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [headerVisible, setHeaderVisible] = useState(true);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [searchModalOpen, setSearchModalOpen] = useState(false);
   const [shareModalOpen, setShareModalOpen] = useState(false);
 
-  // Global keydown shortcut for Audit Search (Cmd+K / Ctrl+K)
+  // Global keydown shortcuts: Cmd+K / Ctrl+K for Search, Alt+H for Toggle Header
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setSearchModalOpen((prev) => !prev);
       }
+      if (e.altKey && e.key.toLowerCase() === "h") {
+        e.preventDefault();
+        setHeaderVisible((prev) => !prev);
+      }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  // Auto-close sidebar on small screens (< 768px)
+  useEffect(() => {
+    const handleResize = () => {
+      if (typeof window !== "undefined" && window.innerWidth < 768) {
+        setSidebarOpen(false);
+      }
+    };
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
   }, []);
 
   // Prompt Form State
@@ -286,7 +308,14 @@ function MainChatLayout() {
   // Persist live session updates to local cache and sync historicalLog
   useEffect(() => {
     if (activeSessionId && log.length > 0) {
-      cacheSessionView(activeSessionId, log, phases);
+      cacheSessionView(
+        activeSessionId,
+        log,
+        phases,
+        liveSessionState && Object.keys(liveSessionState).length > 0
+          ? liveSessionState
+          : sessionState || undefined
+      );
       setHistoricalLog(log);
       if (liveSessionState && Object.keys(liveSessionState).length > 0) {
         setSessionState(liveSessionState);
@@ -316,7 +345,7 @@ function MainChatLayout() {
 
   // Read URL Params (session & userId)
   useEffect(() => {
-    const sId = searchParams.get("sessionId");
+    const sId = searchParams.get("sessionId") || searchParams.get("session");
     const uId = searchParams.get("userId");
     if (uId) {
       setUserIdState(uId);
@@ -468,9 +497,12 @@ function MainChatLayout() {
     const targetApp = appName || activeAppName;
     const cached = getSessionCache(sid);
 
-    // If we have cached logs in localStorage, restore them immediately
+    // If we have cached logs or state in localStorage, restore them immediately
     if (cached?.logs && cached.logs.length > 0) {
       setHistoricalLog(cached.logs as LogEntry[]);
+    }
+    if (cached?.state && Object.keys(cached.state).length > 0) {
+      setSessionState(cached.state);
     }
 
     try {
@@ -729,34 +761,77 @@ function MainChatLayout() {
           sidebarOpen ? "md:ml-[280px]" : "md:ml-[60px]"
         }`}
       >
-        {/* ─── Guardian Top Header with ADK App Switcher ─── */}
-        <GuardianHeader
-          isSidebarOpen={sidebarOpen}
-          onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
-          activeSessionId={activeSessionId ?? undefined}
-          activeRepo={currentActiveSession?.repoName || currentActiveSession?.userRequest}
-          availableApps={availableApps}
-          activeAppName={activeAppName}
-          onSelectApp={handleSelectApp}
-          onToggleInspector={() => setInspectorOpen(!inspectorOpen)}
-          onOpenSearch={() => setSearchModalOpen(true)}
-          inspectorOpen={inspectorOpen}
-          isRunning={isRunning}
-        />
+        {/* ─── Guardian Top Section (Header + Trace Ribbon - Collapsible) ─── */}
+        {headerVisible ? (
+          <>
+            <GuardianHeader
+              isSidebarOpen={sidebarOpen}
+              onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
+              headerVisible={headerVisible}
+              onToggleHeader={() => setHeaderVisible(false)}
+              activeSessionId={activeSessionId ?? undefined}
+              activeRepo={currentActiveSession?.repoName || currentActiveSession?.userRequest}
+              availableApps={availableApps}
+              activeAppName={activeAppName}
+              onSelectApp={handleSelectApp}
+              onToggleInspector={() => setInspectorOpen(!inspectorOpen)}
+              onOpenSearch={() => setSearchModalOpen(true)}
+              onOpenShare={() => setShareModalOpen(true)}
+              inspectorOpen={inspectorOpen}
+              isRunning={isRunning}
+            />
 
-        {/* ─── Interactive User Trace Ribbon Bar ─── */}
-        {(activeSessionId !== null || isRunning || activeLogs.length > 0) && (
-          <UserTraceBar
-            chatTitle={activeChatTitle}
-            isRunning={isRunning}
-            activeAgent={activeAgent}
-            activePhase={isRunning ? "Analyzing Execution" : "Ready"}
-            elapsedSeconds={elapsedSeconds}
-            sessionState={currentSessionState || {}}
-            logCount={activeLogs.length}
-            onOpenConsole={() => setInspectorOpen(true)}
-            onOpenArtifacts={() => setInspectorOpen(true)}
-          />
+            {/* ─── Interactive User Trace Ribbon Bar ─── */}
+            {(activeSessionId !== null || isRunning || activeLogs.length > 0) && (
+              <UserTraceBar
+                chatTitle={activeChatTitle}
+                isRunning={isRunning}
+                activeAgent={activeAgent}
+                activePhase={isRunning ? "Analyzing Execution" : "Ready"}
+                elapsedSeconds={elapsedSeconds}
+                sessionState={currentSessionState || {}}
+                logCount={activeLogs.length}
+                onOpenConsole={() => setInspectorOpen(true)}
+                onOpenArtifacts={() => setInspectorOpen(true)}
+              />
+            )}
+          </>
+        ) : (
+          /* ─── Top-Right Floating Restore Toggle Bar (when full top section is hidden) ─── */
+          <div className="sticky top-2 z-30 flex justify-end px-3 sm:px-6 pointer-events-none mb-1">
+            <div className="pointer-events-auto flex items-center gap-1.5 p-1 bg-white/95 dark:bg-[#212121]/95 backdrop-blur-md border border-black/10 dark:border-white/10 rounded-xl shadow-md animate-in fade-in slide-in-from-top-1 duration-150">
+              <button
+                onClick={() => setHeaderVisible(true)}
+                className="p-1.5 rounded-lg bg-[#2525A3]/10 dark:bg-[#2525A3]/20 hover:bg-[#2525A3] hover:text-white dark:hover:bg-[#2525A3] text-[#2525A3] dark:text-[#A6C3EE] border border-[#2525A3]/30 hover:border-[#2525A3] transition-all cursor-pointer shadow-2xs group"
+                title="Show Header (Alt+H)"
+                aria-label="Show Header"
+              >
+                <ChevronDown className="h-4 w-4 group-hover:text-white transition-colors" />
+              </button>
+
+              <button
+                onClick={() => setSearchModalOpen(true)}
+                className="p-1.5 rounded-lg border border-black/10 dark:border-white/10 text-[#737373] dark:text-[#8E8EA0] hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 text-xs cursor-pointer transition-colors"
+                title="Search audits (⌘K)"
+                aria-label="Search audits"
+              >
+                <Search className="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={() => setInspectorOpen(!inspectorOpen)}
+                className={`flex items-center gap-1 px-2 py-1 rounded-lg border transition-colors cursor-pointer text-xs ${
+                  inspectorOpen
+                    ? "bg-[#2525A3] text-white border-[#2525A3]"
+                    : "border-black/10 dark:border-white/10 text-[#737373] dark:text-[#8E8EA0] hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5"
+                }`}
+                title="Toggle Console"
+                aria-label="Toggle Console"
+              >
+                <SlidersHorizontal className="h-3 w-3" />
+                <span className="hidden sm:inline text-[11px]">Console</span>
+              </button>
+            </div>
+          </div>
         )}
 
         {/* Center Main View Area */}
@@ -768,104 +843,15 @@ function MainChatLayout() {
                 {/* ─── Empty / Welcome Hero State ─── */}
                 {activeSessionId === null && (
                   <div className="flex flex-col items-center justify-center py-12 md:py-20 text-center animate-fade-in">
-                    {/* Glowing Agent Guardian Logo */}
-                    <AgentGuardianLogo size={64} withGlow priority className="mb-6" />
+                    {/* Agent Guardian Logo */}
+                    <AgentGuardianLogo size={64} priority className="mb-6" />
 
                     <h1 className="text-xl md:text-2xl font-headline font-bold text-black dark:text-white mb-2 tracking-tight">
                       What would you like to audit today?
                     </h1>
-                    <p className="text-xs md:text-sm text-[#737373] dark:text-[#8E8EA0] max-w-lg mb-8 leading-relaxed font-sans">
+                    <p className="text-xs md:text-sm text-[#737373] dark:text-[#8E8EA0] max-w-lg mb-4 leading-relaxed font-sans">
                       Autonomous multi-agent review for code security, framework compliance, and quality.
                     </p>
-
-                    {/* 4 Suggestion Cards */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 w-full max-w-2xl text-left">
-                      <button
-                        onClick={() => {
-                          setPromptInput("Audit this repository for hardcoded secrets, token leaks, and OWASP vulnerabilities: https://github.com/google/genai-toolbox");
-                        }}
-                        className="group flex flex-col justify-between p-4 rounded-2xl border border-black/10 dark:border-white/10 bg-[#F9F9F9] dark:bg-[#2F2F2F] hover:bg-black/5 dark:hover:bg-[#383838] hover:border-[#2525A3]/50 transition-all cursor-pointer shadow-sm text-left"
-                      >
-                        <div className="flex items-center gap-2.5 mb-1.5">
-                          <ShieldAlert className="h-4 w-4 text-[#2525A3] dark:text-[#A6C3EE]" />
-                          <span className="text-xs font-semibold text-black dark:text-white group-hover:text-[#2525A3] dark:group-hover:text-[#A6C3EE] transition-colors">
-                            Security & Secrets Scan
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-[#737373] dark:text-[#8E8EA0] leading-relaxed">
-                          Detect hardcoded credentials, token leaks, and OWASP vulnerabilities.
-                        </p>
-                      </button>
-
-                      <button
-                        onClick={() => {
-                          setPromptInput("Verify agent architecture compliance, execution loops, and state schema integrity: https://github.com/google/genai-toolbox");
-                        }}
-                        className="group flex flex-col justify-between p-4 rounded-2xl border border-black/10 dark:border-white/10 bg-[#F9F9F9] dark:bg-[#2F2F2F] hover:bg-black/5 dark:hover:bg-[#383838] hover:border-[#2525A3]/50 transition-all cursor-pointer shadow-sm text-left"
-                      >
-                        <div className="flex items-center gap-2.5 mb-1.5">
-                          <Layers className="h-4 w-4 text-[#2525A3] dark:text-[#A6C3EE]" />
-                          <span className="text-xs font-semibold text-black dark:text-white group-hover:text-[#2525A3] dark:group-hover:text-[#A6C3EE] transition-colors">
-                            Architecture & Agent Flow
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-[#737373] dark:text-[#8E8EA0] leading-relaxed">
-                          Check agent workflows, loop safety, and state schema integrity.
-                        </p>
-                      </button>
-
-                      <button
-                        onClick={() => {
-                          setPromptInput("Analyze codebase quality, prepare code fixes, and generate remediation suggestions: https://github.com/google/genai-toolbox");
-                        }}
-                        className="group flex flex-col justify-between p-4 rounded-2xl border border-black/10 dark:border-white/10 bg-[#F9F9F9] dark:bg-[#2F2F2F] hover:bg-black/5 dark:hover:bg-[#383838] hover:border-[#2525A3]/50 transition-all cursor-pointer shadow-sm text-left"
-                      >
-                        <div className="flex items-center gap-2.5 mb-1.5">
-                          <GitBranch className="h-4 w-4 text-[#2525A3] dark:text-[#A6C3EE]" />
-                          <span className="text-xs font-semibold text-black dark:text-white group-hover:text-[#2525A3] dark:group-hover:text-[#A6C3EE] transition-colors">
-                            Code Quality & Fixes
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-[#737373] dark:text-[#8E8EA0] leading-relaxed">
-                          Identify bugs, code smells, and generate remediation fixes.
-                        </p>
-                      </button>
-
-                      <button
-                        onClick={() => {
-                          fileInputRef.current?.click();
-                        }}
-                        className="group flex flex-col justify-between p-4 rounded-2xl border border-black/10 dark:border-white/10 bg-[#F9F9F9] dark:bg-[#2F2F2F] hover:bg-black/5 dark:hover:bg-[#383838] hover:border-[#2525A3]/50 transition-all cursor-pointer shadow-sm text-left"
-                      >
-                        <div className="flex items-center gap-2.5 mb-1.5">
-                          <Upload className="h-4 w-4 text-blue-500 dark:text-blue-400" />
-                          <span className="text-xs font-semibold text-black dark:text-white group-hover:text-blue-500 transition-colors">
-                            Audit Local Project
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-[#737373] dark:text-[#8E8EA0] leading-relaxed">
-                          Upload a ZIP archive to analyze your codebase locally.
-                        </p>
-                      </button>
-                    </div>
-
-                    {/* Sample Repository Chips */}
-                    <div className="flex flex-wrap items-center justify-center gap-2 mt-8">
-                      <span className="text-[11px] text-[#737373] dark:text-[#8E8EA0]">Examples:</span>
-                      {[
-                        "https://github.com/google/genai-toolbox",
-                        "https://github.com/fastapi/fastapi",
-                        "https://github.com/langchain-ai/langgraph",
-                      ].map((url) => (
-                        <button
-                          key={url}
-                          onClick={() => setPromptInput(`Audit this repository: ${url}`)}
-                          className="px-2.5 py-1 rounded-full bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 border border-black/5 dark:border-white/5 text-[11px] font-mono text-black dark:text-[#ECECF1] transition-colors cursor-pointer"
-                        >
-                          {url.replace("https://github.com/", "")}
-                        </button>
-                      ))}
-                    </div>
                   </div>
                 )}
 
@@ -902,6 +888,8 @@ function MainChatLayout() {
                           setSelectedEvent(ev);
                           setInspectorOpen(true);
                         }}
+                        onApproveRemediation={() => sendRemediationDecision(true)}
+                        onSkipRemediation={() => sendRemediationDecision(false)}
                       />
                     ))}
 
@@ -918,7 +906,31 @@ function MainChatLayout() {
                           setSelectedEvent(ev);
                           setInspectorOpen(true);
                         }}
+                        onApproveRemediation={() => sendRemediationDecision(true)}
+                        onSkipRemediation={() => sendRemediationDecision(false)}
                       />
+                    )}
+
+                    {/* Remediation Status Banner */}
+                    {((currentSessionState?.remediation_status === "pending_approval" &&
+                      !activeLogs.some(
+                        (l) =>
+                          l.author === "remediation_planner" ||
+                          (typeof l.text === "string" &&
+                            (l.text.includes('"pr_title"') || l.text.includes("Proposed Remediation Plan")))
+                      )) ||
+                      currentSessionState?.remediation_status === "created" ||
+                      Boolean(currentSessionState?.remediation_pr_url)) && (
+                      <div className="my-3 px-2">
+                        <RemediationBanner
+                          prUrl={currentSessionState?.remediation_pr_url}
+                          status={currentSessionState?.remediation_status as any}
+                          planSummary={currentSessionState?.remediation_plan_summary}
+                          onApprove={() => sendRemediationDecision(true)}
+                          onSkip={() => sendRemediationDecision(false)}
+                          busy={isRunning}
+                        />
+                      </div>
                     )}
 
                     {/* Thinking Indicator */}

@@ -635,11 +635,16 @@ async def split_codebase_callback(callback_context: CallbackContext):
         callback_context.state["is_large_codebase"] = False
 
     # === ARTIFACT STORAGE: Source Snapshot ===
+    # Use a short, stable filename ("src.md") to avoid overflowing Windows' 260-char MAX_PATH
+    # when combined with deep nested ADK artifact paths on OneDrive-synced directories
+    # (`<root>/.../artifacts/<name>/versions/0/<name>`).
+    snapshot_filename = "src.md"
     try:
         snapshot_content = f"# Source Snapshot\n\nGenerated during ingestion phase.\n\n{raw}"
         artifact = types.Part(inline_data=types.Blob(data=snapshot_content.encode("utf-8"), mime_type="text/markdown"))
-        await callback_context.save_artifact(filename="source_snapshot.md", artifact=artifact)
-        logger.info("Ingestion: Source snapshot artifact saved.")
+        await callback_context.save_artifact(filename=snapshot_filename, artifact=artifact)
+        callback_context.state["source_artifact_name"] = snapshot_filename
+        logger.info(f"Ingestion: Source snapshot artifact saved to {snapshot_filename}.")
     except Exception as e:
         logger.warning(f"Ingestion: Failed to save snapshot artifact: {e}")
 

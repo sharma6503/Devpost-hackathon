@@ -345,6 +345,30 @@ export function applyEventInto(
   };
 }
 
+/**
+ * Recursively merges partial source objects into target without mutating target.
+ * Retains sibling fields on nested structures (review_metrics, module_map, review_plan).
+ */
+export function deepMergeState<T extends Record<string, any>>(target: T, source: Partial<T>): T {
+  if (!source || typeof source !== "object") return target;
+  const result: any = { ...target };
+  for (const [key, value] of Object.entries(source)) {
+    if (
+      value !== null &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      typeof result[key] === "object" &&
+      result[key] !== null &&
+      !Array.isArray(result[key])
+    ) {
+      result[key] = deepMergeState(result[key], value);
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
 function deepClonePhases(phases: PipelinePhase[]): PipelinePhase[] {
   return phases.map((p) => ({
     ...p,

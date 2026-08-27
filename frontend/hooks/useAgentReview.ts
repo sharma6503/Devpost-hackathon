@@ -2,7 +2,14 @@
 
 import { useCallback, useReducer, useRef } from "react";
 import { runSse, getOrCreateSession } from "@/lib/adk-client";
-import { applyEvent, buildInitialPhases, finalizePhases, isDuplicateLog, toMillis } from "@/lib/event-parser";
+import {
+  applyEvent,
+  buildInitialPhases,
+  deepMergeState,
+  finalizePhases,
+  isDuplicateLog,
+  toMillis,
+} from "@/lib/event-parser";
 import type {
   AdkEvent,
   LogEntry,
@@ -22,10 +29,7 @@ interface ReviewHookState {
   isRunning: boolean;
   error: string | null;
   elapsedMs: number;
-  /** True when THIS run's events delivered review artifacts (synthesis/report/
-   *  metrics). Stays false for conversational turns — greetings, follow-up
-   *  questions — so the UI can show the Synthesis Overview only after an
-   *  actual completed review. Seeded state does NOT count. */
+  /** True when review artifacts are present (synthesis/report/metrics). */
   producedReview: boolean;
 }
 
@@ -43,14 +47,20 @@ type Action =
   | { type: "RESET" }
   | { type: "USER_MESSAGE"; text: string }
   | { type: "EVENT"; event: AdkEvent }
-  | { type: "LIVE"; entry: LogEntry }
+  | { type: "LIVE"; entry: LogEntry | null }
   | { type: "TICK"; elapsedMs: number }
   | { type: "COMPLETE" }
   | { type: "ERROR"; message: string };
 
 function reducer(state: ReviewHookState, action: Action): ReviewHookState {
   switch (action.type) {
-    case "START":
+    case "START": {
+      const seedState = action.seed?.sessionState ?? {};
+      const hasPriorReview = Boolean(
+        seedState.synthesis_result &&
+        seedState.synthesis_result !== "Not provided or skipped." &&
+        !seedState.synthesis_result.startsWith("[INGESTION_FAILED]")
+      );
       return {
         ...state,
         isRunning: true,
@@ -58,12 +68,13 @@ function reducer(state: ReviewHookState, action: Action): ReviewHookState {
         phases: action.seed?.phases?.length ? action.seed.phases : buildInitialPhases(),
         log: action.seed?.log ?? [],
         liveEntry: null,
-        sessionState: action.seed?.sessionState ?? {},
+        sessionState: seedState,
         isComplete: false,
         activeAgent: null,
         elapsedMs: 0,
-        producedReview: false,
+        producedReview: hasPriorReview,
       };
+    }
 
     case "RESET":
       return {
@@ -107,7 +118,7 @@ function reducer(state: ReviewHookState, action: Action): ReviewHookState {
           : state.log;
 
       const sessionState = Object.keys(stateDelta).length
-        ? { ...state.sessionState, ...(stateDelta as Partial<ReviewState>) }
+        ? deepMergeState(state.sessionState, stateDelta as Partial<ReviewState>)
         : state.sessionState;
 
       // Review-pipeline runs write these keys via state deltas; chat turns never do.

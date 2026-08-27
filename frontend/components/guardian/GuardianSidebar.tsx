@@ -190,14 +190,16 @@ export function GuardianSidebar({
       )}
 
       <aside
-        className={`fixed inset-y-0 left-0 z-40 flex flex-col bg-[#F9F9F9] dark:bg-[#171717] border-r border-black/10 dark:border-white/10 transition-all duration-300 select-none ${
-          isOpen ? "w-[280px] sm:w-[280px]" : "w-0 -translate-x-full md:translate-x-0 md:w-[60px]"
+        className={`fixed inset-y-0 left-0 z-40 flex flex-col overflow-hidden bg-[#F9F9F9] dark:bg-[#171717] transition-all duration-300 select-none ${
+          isOpen
+            ? "w-[280px] max-w-[85vw] border-r border-black/10 dark:border-white/10 shadow-2xl md:shadow-none translate-x-0"
+            : "w-0 -translate-x-full border-r-0 pointer-events-none opacity-0 md:opacity-100 md:pointer-events-auto md:translate-x-0 md:w-[60px] md:border-r md:border-black/10 dark:md:border-white/10"
         }`}
         aria-label="Sidebar Navigation"
       >
         {/* Expanded Sidebar View */}
         {isOpen ? (
-          <div className="flex flex-col h-full w-full overflow-hidden">
+          <div className="flex flex-col h-full w-[280px] max-w-[85vw] overflow-hidden">
             {/* Top Header Row */}
             <div className="flex items-center justify-between px-3 py-3 border-b border-black/5 dark:border-white/5">
               <div className="flex items-center gap-2">
@@ -524,7 +526,7 @@ export function GuardianSidebar({
           </div>
         ) : (
           /* Collapsed Sidebar Rail */
-          <div className="flex flex-col items-center justify-between h-full py-3">
+          <div className="hidden md:flex flex-col items-center justify-between h-full w-[60px] py-3 overflow-hidden">
             <div className="flex flex-col items-center gap-3">
               <button
                 onClick={onToggle}

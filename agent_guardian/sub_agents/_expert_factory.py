@@ -21,6 +21,8 @@ from ..tools import (
     github_list_multiple_directories,
     parse_uploaded_files,
     read_artifact_file,
+    pull_gcp_skill,
+    list_available_gcp_skills,
 )
 from ..utils.mcp_factory import get_github_mcp_toolset
 from ..utils.skill_loader import get_skill_toolset
@@ -33,6 +35,8 @@ def get_base_tools() -> List[Any]:
     tools: List[Any] = [
         parse_uploaded_files,
         read_artifact_file,
+        pull_gcp_skill,
+        list_available_gcp_skills,
         github_get_file_contents,
         github_list_directory_contents,
         github_get_multiple_files,

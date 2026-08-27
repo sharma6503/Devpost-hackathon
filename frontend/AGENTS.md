@@ -29,7 +29,7 @@ The proxy route handles client-to-backend communication:
 - `listApps(customBaseUrl?: string)`: Queries upstream apps.
 - `createSession(...)`: Initializes user session under `appName`.
 - `runSse(...)`: Consumes the chunked SSE stream and dispatches parsed JSON events to listeners.
-- `listArtifacts(...)` / `getArtifact(...)`: Interacts with ADK `FileArtifactService`.
+- `listArtifacts(...)` / `getArtifact(...)`: Interacts with ADK Artifact Services (`FileArtifactService` in development, `GcsArtifactService` in production).
 
 ### 2.3 Event Parser & State Accumulator (`frontend/lib/event-parser.ts`)
 ADK events are processed into structured review state via `applyEventInto(state, event)`:

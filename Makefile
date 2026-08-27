@@ -15,12 +15,14 @@ PYTEST_ARGS ?=
 FRONTEND_DIR ?= frontend
 NPM ?= npm --prefix $(FRONTEND_DIR)
 
-# Cloud Run / Artifact Registry
-GCP_PROJECT  ?= imgcp-51c5a39739fbedcd
-GCP_REGION   ?= us-central1
-AR_REPO      ?= agent-guardian
-BACKEND_IMG  := $(GCP_REGION)-docker.pkg.dev/$(GCP_PROJECT)/$(AR_REPO)/backend
-FRONTEND_IMG := $(GCP_REGION)-docker.pkg.dev/$(GCP_PROJECT)/$(AR_REPO)/frontend
+# Cloud Run / Artifact Registry / GCS Artifacts
+GCP_PROJECT          ?= imgcp-51c5a39739fbedcd
+GCP_REGION           ?= us-central1
+AR_REPO              ?= agent-guardian
+ARTIFACT_BUCKET      ?= agentguardian-prod-artifacts
+ARTIFACT_SERVICE_URI ?= gs://$(ARTIFACT_BUCKET)
+BACKEND_IMG          := $(GCP_REGION)-docker.pkg.dev/$(GCP_PROJECT)/$(AR_REPO)/backend
+FRONTEND_IMG         := $(GCP_REGION)-docker.pkg.dev/$(GCP_PROJECT)/$(AR_REPO)/frontend
 
 .DEFAULT_GOAL := help
 
@@ -165,6 +167,10 @@ docker-build-backend: ## Build backend image for Cloud Run
 docker-build-frontend: ## Build frontend image for Cloud Run
 	docker build -t $(FRONTEND_IMG):latest $(FRONTEND_DIR)
 
+.PHONY: setup-gcs-artifacts
+setup-gcs-artifacts: ## Provision the GCS bucket for ADK artifacts storage
+	gcloud storage buckets create gs://$(ARTIFACT_BUCKET) --project=$(GCP_PROJECT) --location=$(GCP_REGION) --uniform-bucket-level-access || true
+
 .PHONY: deploy-backend
 deploy-backend: ## Build via Cloud Build and deploy backend to upskilling-agent-service
 	gcloud builds submit --tag $(BACKEND_IMG):latest --project $(GCP_PROJECT) .
@@ -174,7 +180,7 @@ deploy-backend: ## Build via Cloud Build and deploy backend to upskilling-agent-
 		--args="" \
 		--region $(GCP_REGION) \
 		--project $(GCP_PROJECT) \
-		--update-env-vars "SESSION_SERVICE_URI=agentengine://projects/$(GCP_PROJECT)/locations/$(GCP_REGION)/reasoningEngines/6839756721917788160,GOOGLE_CLOUD_PROJECT=$(GCP_PROJECT),GOOGLE_CLOUD_LOCATION=global,SESSION_LOCATION=$(GCP_REGION),GOOGLE_CLOUD_AGENT_ENGINE_LOCATION=$(GCP_REGION)"
+		--update-env-vars "SESSION_SERVICE_URI=agentengine://projects/$(GCP_PROJECT)/locations/$(GCP_REGION)/reasoningEngines/6839756721917788160,ARTIFACT_SERVICE_URI=$(ARTIFACT_SERVICE_URI),ENABLE_CLOUD_TRACING=true,OTEL_SERVICE_NAME=agent-guardian,OTEL_SEMCONV_STABILITY_OPT_IN=gen_ai_agent_spans,GOOGLE_CLOUD_PROJECT=$(GCP_PROJECT),GOOGLE_CLOUD_LOCATION=global,SESSION_LOCATION=$(GCP_REGION),GOOGLE_CLOUD_AGENT_ENGINE_LOCATION=$(GCP_REGION)"
 
 .PHONY: deploy-frontend
 deploy-frontend: ## Build via Cloud Build and deploy frontend to upskilling-agent-service-frontend

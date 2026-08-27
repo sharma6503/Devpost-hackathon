@@ -14,28 +14,26 @@ const AUTOCORRECT_USER = process.env.ADK_PROXY_AUTOCORRECT_USER === "true";
  */
 function findCorrectUserIdForSession(sessionId: string): string | null {
   if (!AUTOCORRECT_USER) return null;
-  // Guard against path traversal: block separators, directory indicators, or absurdly long strings
+  // Guard against path traversal: strictly allow only alphanumeric, underscores, and hyphens
   if (
     !sessionId ||
     typeof sessionId !== "string" ||
-    sessionId.includes("..") ||
-    sessionId.includes("/") ||
-    sessionId.includes("\\") ||
-    sessionId.length > 128
+    !/^[a-zA-Z0-9_-]{1,128}$/.test(sessionId)
   ) {
     return null;
   }
   try {
     const cwd = process.cwd();
     const possiblePaths = [
-      path.resolve(cwd, "../.adk/artifacts/users"),
-      path.resolve(cwd, ".adk/artifacts/users"),
+      path.resolve(/*turbopackIgnore: true*/ cwd, "../.adk/artifacts/users"),
+      path.resolve(/*turbopackIgnore: true*/ cwd, ".adk/artifacts/users"),
     ];
 
     for (const usersPath of possiblePaths) {
       if (!fs.existsSync(usersPath)) continue;
       const userDirs = fs.readdirSync(usersPath);
       for (const userDir of userDirs) {
+        if (!/^[a-zA-Z0-9_.-]{1,128}$/.test(userDir)) continue;
         const sessionPath = path.join(usersPath, userDir, "sessions", sessionId);
         if (fs.existsSync(sessionPath)) {
           return userDir;
@@ -48,7 +46,6 @@ function findCorrectUserIdForSession(sessionId: string): string | null {
   return null;
 }
 
-
 // Resolve the upstream ADK backend. In production we refuse to silently fall
 // back to localhost — an unset URL there is a misconfiguration that should fail
 // loudly (clean 500) rather than proxy to a host that isn't the backend. In
@@ -57,22 +54,64 @@ const ADK_BASE_CONFIGURED =
   process.env.ADK_BASE_URL ?? process.env.NEXT_PUBLIC_ADK_BASE_URL ?? null;
 const DEV_FALLBACK = "http://127.0.0.1:8000";
 
-function resolveAdkBase(req?: NextRequest): string {
-  // Allow client to supply custom ADK base endpoint via header (e.g. for multiple environments)
-  const headerBase = req?.headers.get("x-adk-base-url");
-  if (headerBase && typeof headerBase === "string") {
-    try {
-      const parsed = new URL(headerBase);
-      if (parsed.protocol === "http:" || parsed.protocol === "https:") {
-        return headerBase.replace(/\/+$/, "");
-      }
-    } catch {
-      // Invalid custom URL, fall through to default
+const ALLOWED_CUSTOM_HOSTS = (process.env.ALLOWED_ADK_HOSTS ?? "")
+  .split(",")
+  .map((h) => h.trim().toLowerCase())
+  .filter(Boolean);
+
+/**
+ * Validates whether a client-supplied x-adk-base-url is safe against SSRF attacks.
+ */
+function isSafeCustomAdkBase(urlStr: string): boolean {
+  try {
+    const parsed = new URL(urlStr);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return false;
     }
+
+    const hostname = parsed.hostname.toLowerCase();
+
+    // Block cloud metadata services & link-local addresses
+    if (
+      hostname === "169.254.169.254" ||
+      hostname === "metadata.google.internal" ||
+      hostname === "metadata" ||
+      hostname.startsWith("169.254.")
+    ) {
+      return false;
+    }
+
+    // In production, enforce explicit allowlist or match configured backend
+    if (process.env.NODE_ENV === "production") {
+      if (ALLOWED_CUSTOM_HOSTS.length > 0) {
+        return ALLOWED_CUSTOM_HOSTS.includes(hostname);
+      }
+      if (ADK_BASE_CONFIGURED) {
+        try {
+          const configuredHost = new URL(ADK_BASE_CONFIGURED).hostname.toLowerCase();
+          return hostname === configuredHost;
+        } catch {
+          return false;
+        }
+      }
+      return false;
+    }
+
+    // In development/test, allow localhost / loopback or trusted LAN
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function resolveAdkBase(req?: NextRequest): string {
+  // Allow client to supply custom ADK base endpoint via header only if it passes SSRF validation
+  const headerBase = req?.headers.get("x-adk-base-url");
+  if (headerBase && typeof headerBase === "string" && isSafeCustomAdkBase(headerBase)) {
+    return headerBase.replace(/\/+$/, "");
   }
   return ADK_BASE_CONFIGURED || DEV_FALLBACK;
 }
-
 
 // Timeout for non-streaming CRUD proxied to ADK. A full session GET can be
 // multi-MB (events embed the codebase, tool responses, and the rendered HTML
@@ -100,7 +139,7 @@ const ALLOWED = [
 function isAllowedPath(segments: string[]): boolean {
   const joined = segments.join("/");
   // Reject path-traversal attempts
-  if (joined.includes("..") || joined.includes("%2e")) return false;
+  if (joined.includes("..") || joined.includes("%2e") || joined.includes("\\")) return false;
   return ALLOWED.some((re) => re.test(joined));
 }
 

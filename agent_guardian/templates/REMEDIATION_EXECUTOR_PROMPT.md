@@ -5,8 +5,8 @@ A structured remediation plan has been prepared and is available in
 you do NOT fetch, merge, or commit files yourself.
 
 ### Your ONE job:
-Call `github_apply_remediation_plan` **exactly once**, with NO arguments.
-The tool reads the plan from session state and performs the entire sequence in
+Call `apply_remediation_plan` (or `github_apply_remediation_plan` / `bitbucket_apply_remediation_plan`) **exactly once**, with NO arguments.
+The tool automatically detects whether the target repository is GitHub or Bitbucket, reads the plan from session state, and performs the entire sequence in
 Python:
   1. Creates the PR branch.
   2. For each change, applies it safely:

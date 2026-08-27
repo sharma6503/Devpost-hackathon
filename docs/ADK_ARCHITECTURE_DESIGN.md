@@ -97,9 +97,10 @@ An expandable slide-out panel accessible from any page:
 * **Telemetry Tab**: Visual counters for input/output token counts, pipeline elapsed time, and per-agent latency.
 * **Artifacts Tab**: Direct viewer and one-click download for `report.html` and remediation patches.
 
-### 4.2 Distributed Tracing & Logging
-* **OpenTelemetry**: Emits spans for each subagent, tool call, and LLM turn to Google Cloud Trace.
-* **Datadog LLM Observability**: In-process auto-instrumentation for Gemini and ADK spans with unified service attribution (`DD_SERVICE=agent-guardian`, `DD_ENV=production`).
+### 4.2 Distributed Tracing & Telemetry
+* **Google Cloud Trace via OpenTelemetry**: Emits distributed spans for each subagent execution (`LlmAgent`, `SequentialAgent`, `ParallelAgent`, `LoopAgent`), Gemini API calls, and tool runs directly to **Google Cloud Trace** via `opentelemetry-exporter-gcp-trace`.
+* **ADK Native Telemetry**: Uses `google.adk.telemetry.google_cloud.get_gcp_exporters` and `google.adk.telemetry.setup.maybe_set_otel_providers` for production span attribution without third-party vendor agents.
+* **GenAI Agent Semantic Conventions**: Implements `OTEL_SEMCONV_STABILITY_OPT_IN=gen_ai_agent_spans` for standardized GenAI span attributes, capturing model parameters, token counts, and step latencies.
 
 ---
 

@@ -152,9 +152,14 @@ def _parse_code_logic(blob: str) -> list[tuple[str, str]]:
     return [(name, _strip_fences("\n".join(buf))) for name, buf in files]
 
 
+_MAX_FILE_CHARS = 500_000
+
+
 def _walk_source_dir(root: str) -> list[tuple[str, str]]:
     """Walk an extracted-source directory for code files (fallback path)."""
     out: list[tuple[str, str]] = []
+    if not os.path.isdir(root):
+        return out
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS]
         for fn in filenames:
@@ -162,8 +167,12 @@ def _walk_source_dir(root: str) -> list[tuple[str, str]]:
                 continue
             full = os.path.join(dirpath, fn)
             try:
+                if os.path.islink(full):
+                    continue
                 with open(full, "r", encoding="utf-8", errors="replace") as f:
-                    out.append((os.path.relpath(full, root).replace("\\", "/"), f.read()))
+                    content = f.read(_MAX_FILE_CHARS + 1)
+                    if len(content) <= _MAX_FILE_CHARS:
+                        out.append((os.path.relpath(full, root).replace("\\", "/"), content))
             except Exception as e:
                 logger.warning(f"_walk_source_dir: could not read {full}: {e}")
                 continue
