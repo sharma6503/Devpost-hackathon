@@ -7,6 +7,7 @@ import type {
   PhaseId,
   PipelinePhase,
   PhaseStatus,
+  ReviewState,
 } from "@/types/adk";
 
 const AGENT_PHASE_MAP: Record<string, PhaseId> = {
@@ -196,7 +197,7 @@ export function applyEventInto(
   const stateDelta: Record<string, unknown> = {};
   const isComplete = false;
 
-  const rawAuthor = event.author || "agent";
+  const rawAuthor = event.author || (event.content?.role === "user" ? "user" : "agent");
   const author = rawAuthor.toLowerCase();
   const phaseId = AGENT_PHASE_MAP[author];
 
@@ -269,7 +270,7 @@ export function applyEventInto(
   if (textPart?.text && !event.partial) {
     newLogEntry = {
       id: event.id ?? fallbackLogId(),
-      author: event.author,
+      author: rawAuthor,
       text: textPart.text,
       isPartial: false,
       timestamp: toMillis(event.timestamp),
@@ -279,7 +280,7 @@ export function applyEventInto(
     const callData = callPart.functionCall || callPart.function_call || (callPart as any);
     newLogEntry = {
       id: event.id ?? fallbackLogId("tool_call"),
-      author: event.author,
+      author: rawAuthor,
       text: `Invoked tool: ${callData.name}`,
       isPartial: false,
       timestamp: toMillis(event.timestamp),
@@ -293,7 +294,7 @@ export function applyEventInto(
     const respData = responsePart.functionResponse || responsePart.function_response || (responsePart as any);
     newLogEntry = {
       id: event.id ?? fallbackLogId("tool_result"),
-      author: event.author,
+      author: rawAuthor,
       text: `Result from ${respData.name}`,
       isPartial: false,
       timestamp: toMillis(event.timestamp),
@@ -306,7 +307,7 @@ export function applyEventInto(
   } else if (transferTo && !event.partial) {
     newLogEntry = {
       id: event.id ?? fallbackLogId("transfer"),
-      author: event.author,
+      author: rawAuthor,
       text: `Delegated execution to ${formatAgentAuthor(transferTo)}`,
       isPartial: false,
       timestamp: toMillis(event.timestamp),
@@ -315,12 +316,26 @@ export function applyEventInto(
   } else if (thoughtPart?.thought && !event.partial) {
     newLogEntry = {
       id: event.id ?? fallbackLogId("thought"),
-      author: event.author,
+      author: rawAuthor,
       text: thoughtPart.thought,
       isPartial: false,
       timestamp: toMillis(event.timestamp),
       type: "thought",
     };
+  } else if (!event.partial) {
+    const inlinePart = parts.find((p) => p.inlineData || (p as any).inline_data);
+    if (inlinePart) {
+      const inline = inlinePart.inlineData || (inlinePart as any).inline_data;
+      const name = inline.displayName || inline.display_name || "codebase.zip";
+      newLogEntry = {
+        id: event.id ?? fallbackLogId("file"),
+        author: rawAuthor,
+        text: `📎 Attached: \`${name}\``,
+        isPartial: false,
+        timestamp: toMillis(event.timestamp),
+        type: "text",
+      };
+    }
   }
 
   // State delta
@@ -429,17 +444,80 @@ export function finalizePhases(phases: PipelinePhase[]): PipelinePhase[] {
 
 /**
  * Safely extracts and validates a letter grade (A-F with optional +/-).
- * Rejects non-grade strings like "Not provided or skipped.", empty strings, etc.
+ * Handles raw strings, prefixes (Grade: A, Overall: A), and object wrappers.
  */
 export function cleanGrade(raw?: any): string | undefined {
-  if (!raw || typeof raw !== "string") return undefined;
-  const trimmed = raw.trim();
+  if (!raw) return undefined;
+  if (typeof raw === "object") {
+    const candidate = raw.grade || raw.evaluation_grade || raw.final_grade || raw.letterGrade;
+    if (candidate) return cleanGrade(candidate);
+    return undefined;
+  }
+  if (typeof raw !== "string") return undefined;
+  const trimmed = raw.trim().replace(/\*/g, "");
   if (/^[A-F][+-]?$/i.test(trimmed)) {
     return trimmed.toUpperCase();
   }
-  const match = trimmed.match(/^Grade\s*:?\s*([A-F][+-]?)/i);
+  const match =
+    trimmed.match(/(?:grade|evaluation|overall)\s*:?\s*([A-F][+-]?)/i) ||
+    trimmed.match(/^([A-F][+-]?)\b/i);
   if (match) {
     return match[1].toUpperCase();
   }
   return undefined;
+}
+
+export interface ReconstructedSession {
+  logs: LogEntry[];
+  phases: PipelinePhase[];
+  sessionState: Partial<ReviewState>;
+}
+
+/**
+ * Reconstructs the complete ordered chat log history, pipeline execution phases,
+ * and accumulated state delta from raw ADK session events.
+ */
+export function reconstructSessionLogs(
+  events: AdkEvent[],
+  initialState?: Partial<ReviewState>
+): ReconstructedSession {
+  if (!events || !Array.isArray(events) || events.length === 0) {
+    return {
+      logs: [],
+      phases: buildInitialPhases(),
+      sessionState: initialState || {},
+    };
+  }
+
+  const sortedEvents = [...events].sort((a, b) => {
+    const timeA = toMillis(a.timestamp);
+    const timeB = toMillis(b.timestamp);
+    return timeA - timeB;
+  });
+
+  const logs: LogEntry[] = [];
+  const phases = buildInitialPhases();
+  let accumulatedState: Partial<ReviewState> = { ...(initialState || {}) };
+  let currentActiveAgent: string | null = null;
+
+  for (const event of sortedEvents) {
+    const update = applyEventInto(phases, event, currentActiveAgent);
+    currentActiveAgent = update.activeAgent;
+
+    if (update.stateDelta && Object.keys(update.stateDelta).length > 0) {
+      accumulatedState = deepMergeState(
+        accumulatedState,
+        update.stateDelta as Partial<ReviewState>
+      );
+    }
+
+    if (update.newLogEntry) {
+      if (!isDuplicateLog(logs[logs.length - 1], update.newLogEntry)) {
+        logs.push(update.newLogEntry);
+      }
+    }
+  }
+
+  const finalPhases = finalizePhases(phases);
+  return { logs, phases: finalPhases, sessionState: accumulatedState };
 }

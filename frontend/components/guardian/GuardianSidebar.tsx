@@ -155,9 +155,26 @@ export function GuardianSidebar({
   const renderGradeBadge = (session: EnrichedSessionItem) => {
     if (session.status === "ACTIVE") {
       return (
-        <span className="flex h-2 w-2 relative" title="Live Running Audit">
+        <span className="flex h-2 w-2 relative shrink-0" title="Live Running Audit">
           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#2525A3] opacity-75" />
           <span className="relative inline-flex rounded-full h-2 w-2 bg-[#2525A3]" />
+        </span>
+      );
+    }
+    if (session.grade) {
+      const g = String(session.grade).toUpperCase();
+      let colorClasses = "bg-gray-500/10 text-gray-500 dark:text-gray-400 border-gray-500/20";
+      if (g === "A") colorClasses = "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30";
+      else if (g === "B") colorClasses = "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30";
+      else if (g === "C") colorClasses = "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30";
+      else if (g === "D" || g === "F") colorClasses = "bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/30";
+
+      return (
+        <span
+          className={`shrink-0 px-1.5 py-0.5 font-mono text-[10px] font-bold rounded border leading-none ${colorClasses}`}
+          title={`Audit Grade: ${g}`}
+        >
+          {g}
         </span>
       );
     }

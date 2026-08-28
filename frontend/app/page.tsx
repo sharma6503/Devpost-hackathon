@@ -77,7 +77,16 @@ import { REMEDIATION_APPROVE_CMD, REMEDIATION_SKIP_CMD } from "@/lib/remediation
 import { formatElapsed } from "@/lib/format";
 
 // Event Parser Helpers
-import { applyEventInto, buildInitialPhases, finalizePhases, isDuplicateLog, toMillis, cleanGrade } from "@/lib/event-parser";
+import {
+  applyEventInto,
+  buildInitialPhases,
+  finalizePhases,
+  isDuplicateLog,
+  toMillis,
+  cleanGrade,
+  reconstructSessionLogs,
+  deepMergeState,
+} from "@/lib/event-parser";
 
 // User Console & Trace Bar
 import { UserConsoleDrawer } from "@/components/console/UserConsoleDrawer";
@@ -115,59 +124,6 @@ function fileToBase64(file: File): Promise<string> {
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
-}
-
-function reconstructSessionLogs(events: AdkEvent[]): { logs: LogEntry[]; phases: PipelinePhase[] } {
-  const sortedEvents = [...events].sort((a, b) => a.timestamp - b.timestamp);
-  const logs: LogEntry[] = [];
-  const phases = buildInitialPhases();
-
-  let currentActiveAgent: string | null = null;
-
-  for (const event of sortedEvents) {
-    const update = applyEventInto(phases, event, currentActiveAgent);
-    currentActiveAgent = update.activeAgent;
-
-    const author = event.author || "system";
-    let text = "";
-
-    if (event.content?.parts) {
-      text = event.content.parts
-        .map((p: Part) => p.text || "")
-        .filter(Boolean)
-        .join("\n");
-    }
-
-    if (!text && event.actions?.stateDelta) {
-      const delta = event.actions.stateDelta as Partial<ReviewState>;
-      if (delta.synthesis_result) {
-        text = delta.synthesis_result;
-      } else if (delta.remediation_plan_summary) {
-        text = `**Remediation Plan Summary:**\n${delta.remediation_plan_summary}`;
-      } else if (delta.evaluation_grade) {
-        text = `*Evaluation Grade: ${delta.evaluation_grade}*`;
-      }
-    }
-
-    if (text.trim()) {
-      const entry: LogEntry = {
-        id: event.id || `hist-${event.timestamp}-${Math.random().toString(36).slice(2, 6)}`,
-        timestamp: event.timestamp,
-        author,
-        text: text.trim(),
-        isPartial: false,
-        type: "text",
-        rawEvent: event,
-      };
-
-      if (!isDuplicateLog(logs[logs.length - 1], entry)) {
-        logs.push(entry);
-      }
-    }
-  }
-
-  finalizePhases(phases);
-  return { logs, phases };
 }
 
 export default function Home() {
@@ -276,8 +232,27 @@ function MainChatLayout() {
   const [sessionState, setSessionState] = useState<Partial<ReviewState> | null>(null);
   const [historicalLog, setHistoricalLog] = useState<LogEntry[]>([]);
   const [sessionLoadError, setSessionLoadError] = useState<string | null>(null);
+  const [loadingHistoricalSession, setLoadingHistoricalSession] = useState(false);
   const [inspectingState, setInspectingState] = useState<Record<string, unknown> | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<AdkEvent | null>(null);
+
+  // Synchronize active session ID in URL query parameter without full reload
+  const syncSessionUrl = useCallback((sid?: string | null) => {
+    if (typeof window === "undefined") return;
+    try {
+      const url = new URL(window.location.href);
+      if (sid) {
+        url.searchParams.set("sessionId", sid);
+        url.searchParams.delete("session");
+      } else {
+        url.searchParams.delete("sessionId");
+        url.searchParams.delete("session");
+      }
+      window.history.pushState({}, "", url.pathname + url.search);
+    } catch {
+      // ignore
+    }
+  }, []);
 
   // Live Audit Hook
   const {
@@ -308,14 +283,12 @@ function MainChatLayout() {
   // Persist live session updates to local cache and sync historicalLog
   useEffect(() => {
     if (activeSessionId && log.length > 0) {
-      cacheSessionView(
-        activeSessionId,
-        log,
-        phases,
+      const finalState =
         liveSessionState && Object.keys(liveSessionState).length > 0
           ? liveSessionState
-          : sessionState || undefined
-      );
+          : sessionState || undefined;
+
+      cacheSessionView(activeSessionId, log, phases, finalState);
       setHistoricalLog(log);
       if (liveSessionState && Object.keys(liveSessionState).length > 0) {
         setSessionState(liveSessionState);
@@ -338,23 +311,29 @@ function MainChatLayout() {
         sessionId: activeSessionId,
         userRequest: userReq,
         startedAt: existing?.startedAt || Date.now(),
+        lastUpdateTime: Date.now(),
         grade: grade as any,
+        userId,
+        appName: activeAppName,
       });
     }
-  }, [log, phases, liveSessionState, activeSessionId, recentSessions]);
+  }, [log, phases, liveSessionState, activeSessionId, recentSessions, userId, activeAppName, sessionState]);
 
   // Read URL Params (session & userId)
   useEffect(() => {
-    const sId = searchParams.get("sessionId") || searchParams.get("session");
+    const rawSid = searchParams.get("sessionId") || searchParams.get("session");
     const uId = searchParams.get("userId");
     if (uId) {
       setUserIdState(uId);
       saveUserIdLocal(uId);
       setUserIdLocked(true);
     }
-    if (sId) {
-      setActiveSessionId(sId);
-      loadHistoricalSession(uId || userId, sId, activeAppName);
+    if (rawSid) {
+      const sId = decodeURIComponent(rawSid.trim());
+      if (sId && sId !== activeSessionId) {
+        setActiveSessionId(sId);
+        loadHistoricalSession(uId || userId, sId, activeAppName);
+      }
     }
   }, [searchParams]);
 
@@ -424,7 +403,10 @@ function MainChatLayout() {
               sessionId: s.id,
               userRequest: userReq,
               startedAt: match?.startedAt || toMillis(s.lastUpdateTime || 0) || Date.now(),
+              lastUpdateTime: toMillis(s.lastUpdateTime || 0) || match?.startedAt || Date.now(),
               grade: grade as any,
+              userId: currentUserId,
+              appName: targetApp,
             });
           }
 
@@ -440,6 +422,23 @@ function MainChatLayout() {
             status: isRunning && activeSessionId === s.id ? "ACTIVE" : undefined,
           };
         });
+
+        // Also merge any local-only sessions that aren't in remote list
+        const remoteIds = new Set(res.map((s) => s.id));
+        for (const loc of local) {
+          if (!remoteIds.has(loc.sessionId)) {
+            enriched.push({
+              sessionId: loc.sessionId,
+              userRequest: loc.userRequest,
+              startedAt: loc.startedAt,
+              lastUpdateTime: loc.lastUpdateTime || loc.startedAt,
+              grade: cleanGrade(loc.grade),
+              adkAlive: false,
+              status: isRunning && activeSessionId === loc.sessionId ? "ACTIVE" : undefined,
+            });
+          }
+        }
+
         enriched.sort((a, b) => {
           const timeA = a.lastUpdateTime || a.startedAt || 0;
           const timeB = b.lastUpdateTime || b.startedAt || 0;
@@ -466,7 +465,7 @@ function MainChatLayout() {
               sessionId: s.sessionId,
               userRequest: userReq,
               startedAt: s.startedAt,
-              lastUpdateTime: s.startedAt,
+              lastUpdateTime: s.lastUpdateTime || s.startedAt,
               grade: cleanGrade(s.grade),
               adkAlive: false,
               status: isRunning && activeSessionId === s.sessionId ? "ACTIVE" : undefined,
@@ -494,7 +493,10 @@ function MainChatLayout() {
   // Load a Historical Session
   const loadHistoricalSession = async (uid: string, sid: string, appName?: string) => {
     setSessionLoadError(null);
-    const targetApp = appName || activeAppName;
+    setLoadingHistoricalSession(true);
+    const stored = getSessions().find((s) => s.sessionId === sid);
+    const effectiveUid = stored?.userId || uid || userId;
+    const targetApp = stored?.appName || appName || activeAppName;
     const cached = getSessionCache(sid);
 
     // If we have cached logs or state in localStorage, restore them immediately
@@ -507,25 +509,34 @@ function MainChatLayout() {
 
     try {
       // Try to fetch or create the session on ADK backend
-      const sess = await getSession(uid, sid, targetApp).catch(async (fetchErr) => {
+      const sess = await getSession(effectiveUid, sid, targetApp).catch(async (fetchErr) => {
         // If 404 (ADK in-memory restart or stale session), create/register on backend
         if (fetchErr?.message?.includes("404")) {
-          return await createSession(uid, sid, undefined, targetApp).catch(() => null);
+          return await createSession(effectiveUid, sid, undefined, targetApp).catch(() => null);
         }
         return null;
       });
 
       if (sess) {
         setHistoricalSession(sess);
-        if (sess.state && Object.keys(sess.state).length > 0) {
-          setSessionState(sess.state);
-        }
+        const mergedState = deepMergeState(cached?.state || {}, sess.state || {});
         if (sess.events && sess.events.length > 0) {
-          const { logs, phases: reconPhases } = reconstructSessionLogs(sess.events);
-          setHistoricalLog(logs);
-          cacheSessionView(sid, logs, reconPhases);
-        } else if (!cached?.logs) {
-          setHistoricalLog([]);
+          const { logs, phases: reconPhases, sessionState: reconState } = reconstructSessionLogs(
+            sess.events,
+            mergedState
+          );
+          const finalState = deepMergeState(mergedState, reconState);
+          const finalLogs = logs.length > 0 ? logs : ((cached?.logs as LogEntry[]) || []);
+          setHistoricalLog(finalLogs);
+          setSessionState(finalState);
+          cacheSessionView(sid, finalLogs, reconPhases, finalState);
+        } else {
+          if (Object.keys(mergedState).length > 0) {
+            setSessionState(mergedState);
+          }
+          if (!cached?.logs || cached.logs.length === 0) {
+            setHistoricalLog([]);
+          }
         }
       } else if (!cached?.logs) {
         setHistoricalLog([]);
@@ -535,6 +546,8 @@ function MainChatLayout() {
       if (!cached?.logs) {
         setSessionLoadError("Backend server is unreachable. Offline mode active.");
       }
+    } finally {
+      setLoadingHistoricalSession(false);
     }
   };
 
@@ -542,20 +555,20 @@ function MainChatLayout() {
   const handleSelectSession = (sid: string) => {
     reset();
     setActiveSessionId(sid);
+    syncSessionUrl(sid);
     loadHistoricalSession(userId, sid, activeAppName);
   };
 
   // Delete a Session
   const handleDeleteSession = async (sid: string) => {
     try {
-      await deleteAdkSession(userId, sid, activeAppName).catch(() => null);
+      const stored = getSessions().find((s) => s.sessionId === sid);
+      const targetUid = stored?.userId || userId;
+      const targetApp = stored?.appName || activeAppName;
+      await deleteAdkSession(targetUid, sid, targetApp).catch(() => null);
       removeSession(sid);
       if (activeSessionId === sid) {
-        reset();
-        setActiveSessionId(null);
-        setHistoricalSession(null);
-        setSessionState(null);
-        setHistoricalLog([]);
+        handleNewAuditSession();
       }
       refreshSessions(userId, activeAppName);
     } catch (err) {
@@ -573,6 +586,7 @@ function MainChatLayout() {
     setPromptInput("");
     setUploadedFile(null);
     setSubmissionError("");
+    syncSessionUrl(null);
   };
 
   // Submit Prompt to Start or Continue Audit
@@ -871,6 +885,23 @@ function MainChatLayout() {
                         >
                           Retry
                         </button>
+                      </div>
+                    )}
+
+                    {/* Historical Session Loading Indicator */}
+                    {loadingHistoricalSession && activeLogs.length === 0 && (
+                      <div className="flex flex-col items-center justify-center py-16 text-center animate-fade-in space-y-3">
+                        <Loader2 className="h-6 w-6 animate-spin text-[#2525A3] dark:text-[#A6C3EE]" />
+                        <span className="text-xs text-[#737373] dark:text-[#8E8EA0] font-mono">
+                          Restoring audit workspace & session history...
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Empty session state */}
+                    {!loadingHistoricalSession && activeLogs.length === 0 && !isReviewing && !sessionLoadError && (
+                      <div className="flex flex-col items-center justify-center py-16 text-center text-xs text-[#737373] dark:text-[#8E8EA0] font-mono">
+                        No messages found in this session. Start by entering a prompt below.
                       </div>
                     )}
 

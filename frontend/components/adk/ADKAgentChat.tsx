@@ -29,6 +29,8 @@ import { useAgentReview } from "@/hooks/useAgentReview";
 import {
   listSessions,
   deleteAdkSession,
+  getSession,
+  createSession,
   getArtifact,
   listArtifacts,
 } from "@/lib/adk-client";
@@ -39,8 +41,10 @@ import {
   generateSessionId,
   getUserProfile,
   getSessionCache,
+  cacheSessionView,
   type StoredSession,
 } from "@/lib/session";
+import { reconstructSessionLogs, deepMergeState } from "@/lib/event-parser";
 import { REMEDIATION_APPROVE_CMD, REMEDIATION_SKIP_CMD } from "@/lib/remediation";
 import type { LogEntry, Session, AdkEvent, ReviewState } from "@/types/adk";
 
@@ -207,6 +211,71 @@ export function ADKAgentChat({
     refreshHistory();
   }, [refreshHistory]);
 
+  // Load Historical Session
+  const loadHistoricalSession = useCallback(
+    async (sid: string) => {
+      const stored = getSessions().find((s) => s.sessionId === sid);
+      const targetUid = stored?.userId || userId;
+      const targetApp = stored?.appName || appName;
+      const cached = getSessionCache(sid);
+
+      if (cached?.logs && cached.logs.length > 0) {
+        setHistoricalLog(cached.logs as LogEntry[]);
+      }
+      if (cached?.state && Object.keys(cached.state).length > 0) {
+        setSessionState(cached.state);
+      }
+
+      try {
+        const sess = await getSession(targetUid, sid, targetApp).catch(async (fetchErr) => {
+          if (fetchErr?.message?.includes("404")) {
+            return await createSession(targetUid, sid, undefined, targetApp).catch(() => null);
+          }
+          return null;
+        });
+
+        if (sess) {
+          setHistoricalSession(sess);
+          const mergedState = deepMergeState(cached?.state || {}, sess.state || {});
+          if (sess.events && sess.events.length > 0) {
+            const { logs, phases: reconPhases, sessionState: reconState } = reconstructSessionLogs(
+              sess.events,
+              mergedState
+            );
+            const finalState = deepMergeState(mergedState, reconState);
+            const finalLogs = logs.length > 0 ? logs : ((cached?.logs as LogEntry[]) || []);
+            setHistoricalLog(finalLogs);
+            setSessionState(finalState);
+            cacheSessionView(sid, finalLogs, reconPhases, finalState);
+          } else {
+            if (Object.keys(mergedState).length > 0) {
+              setSessionState(mergedState);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("Could not fetch historical session:", err);
+      }
+    },
+    [userId, appName]
+  );
+
+  useEffect(() => {
+    if (initialSessionId) {
+      loadHistoricalSession(initialSessionId);
+    }
+  }, [initialSessionId, loadHistoricalSession]);
+
+  // Handle Select Session
+  const handleSelectSession = useCallback(
+    (sid: string) => {
+      resetAgentReview();
+      setActiveSessionId(sid);
+      loadHistoricalSession(sid);
+    },
+    [resetAgentReview, loadHistoricalSession]
+  );
+
   // Handle New Chat
   const handleNewChat = useCallback(() => {
     resetAgentReview();
@@ -288,6 +357,9 @@ export function ADKAgentChat({
             : text
           : fileAttached?.name || "Codebase Audit",
         startedAt: Date.now(),
+        lastUpdateTime: Date.now(),
+        userId,
+        appName,
       });
       refreshHistory();
     } catch (err: any) {
@@ -323,13 +395,14 @@ export function ADKAgentChat({
           onToggle={() => setSidebarOpen(!sidebarOpen)}
           sessions={recentSessions}
           activeSessionId={activeSessionId ?? undefined}
-          onSelectSession={(sid) => {
-            setActiveSessionId(sid);
-          }}
+          onSelectSession={handleSelectSession}
           onNewSession={handleNewChat}
           onDeleteSession={async (sid) => {
+            const stored = getSessions().find((s) => s.sessionId === sid);
+            const targetUid = stored?.userId || userId;
+            const targetApp = stored?.appName || appName;
             removeSession(sid);
-            await deleteAdkSession(userId, sid, appName);
+            await deleteAdkSession(targetUid, sid, targetApp);
             if (activeSessionId === sid) handleNewChat();
             refreshHistory();
           }}

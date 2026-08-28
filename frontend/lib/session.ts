@@ -24,8 +24,12 @@ export interface StoredSession {
   userRequest: string;
   repoUrl?: string;
   startedAt: number;
+  lastUpdateTime?: number;
   grade?: string;
   title?: string;
+  userId?: string;
+  appName?: string;
+  repoName?: string;
 }
 
 /**
@@ -125,6 +129,7 @@ export function saveSession(session: StoredSession): void {
   if (typeof window === "undefined") return;
   const sessions = getSessions();
   const index = sessions.findIndex((s) => s.sessionId === session.sessionId);
+  const now = Date.now();
   if (index >= 0) {
     const existing = sessions[index];
     // Preserve existing non-empty start message if incoming userRequest is empty or an Audit placeholder
@@ -146,13 +151,22 @@ export function saveSession(session: StoredSession): void {
       ...existing,
       ...session,
       userRequest,
-      startedAt: existing.startedAt || session.startedAt,
+      startedAt: existing.startedAt || session.startedAt || now,
+      lastUpdateTime: session.lastUpdateTime || now,
+      userId: session.userId || existing.userId,
+      appName: session.appName || existing.appName,
+      grade: session.grade || existing.grade,
+      repoName: session.repoName || existing.repoName,
     };
   } else {
-    sessions.unshift(session);
+    sessions.unshift({
+      ...session,
+      startedAt: session.startedAt || now,
+      lastUpdateTime: session.lastUpdateTime || session.startedAt || now,
+    });
   }
   try {
-    localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(sessions.slice(0, 50)));
+    localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(sessions.slice(0, 100)));
   } catch (e) {
     console.warn("ag: failed to persist session list", e);
   }
@@ -201,6 +215,8 @@ export function removeSession(sessionId: string): void {
   if (typeof window === "undefined") return;
   const updated = getSessions().filter((s) => s.sessionId !== sessionId);
   localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(updated));
+  localStorage.removeItem(`${SESSION_CACHE_PREFIX}${sessionId}`);
+  localStorage.removeItem(`${PAYLOAD_CACHE_PREFIX}${sessionId}`);
 }
 
 export interface SessionViewCache {
