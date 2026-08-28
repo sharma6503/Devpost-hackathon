@@ -14,7 +14,7 @@
 - **Evaluator-Critic Quality Gate:** Iterative evaluation loop (`LoopAgent`) ensuring findings meet strict evidence, specificity, and actionability thresholds before report generation.
 - **Automated SCM Remediation:** One-click automated branch and Pull Request creation on **GitHub** and **Bitbucket** with human-in-the-loop (HITL) review.
 - **Mission Control Console Drawer:** Real-time observability dashboard featuring raw ADK event inspection, metrics cards, token consumption telemetry, and live artifact browsers.
-- **Executive Dashboard Reports:** Zero-dependency, standalone HTML/Chart.js audit reports with Ingram Micro brand styling.
+- **Executive Dashboard Reports:** Zero-dependency, standalone HTML/Chart.js audit reports.
 
 ---
 

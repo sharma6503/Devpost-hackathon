@@ -182,7 +182,7 @@ async def test_apply_plan_bitbucket():
     import json
 
     plan = {
-        "target_repo": "imonline/agenticai.agentguardian",
+        "target_repo": "enterprise/agent-guardian",
         "pr_branch": "agent_guardian/review",
         "changes": [
             {
@@ -196,7 +196,7 @@ async def test_apply_plan_bitbucket():
     mock_tc = MagicMock()
     mock_tc.state = {
         "remediation_plan": json.dumps(plan),
-        "user_request": "https://bitbucket.org/imonline/agenticai.agentguardian/src/main",
+        "user_request": "https://bitbucket.org/enterprise/agent-guardian/src/main",
     }
 
     _BB = "agent_guardian.tools.bitbucket_tool"
@@ -208,7 +208,7 @@ async def test_apply_plan_bitbucket():
             new=AsyncMock(
                 return_value={
                     "status": "ok",
-                    "pr_url": "https://bitbucket.org/imonline/agenticai.agentguardian/pull-requests/1",
+                    "pr_url": "https://bitbucket.org/enterprise/agent-guardian/pull-requests/1",
                     "number": 1,
                 }
             ),
@@ -217,7 +217,7 @@ async def test_apply_plan_bitbucket():
         res = await github_apply_remediation_plan(plan=plan, tool_context=mock_tc)
 
     assert res["status"] == "ok"
-    assert res["pr_url"] == "https://bitbucket.org/imonline/agenticai.agentguardian/pull-requests/1"
+    assert res["pr_url"] == "https://bitbucket.org/enterprise/agent-guardian/pull-requests/1"
     assert len(res["committed"]) == 1
     assert res["committed"][0]["finding_id"] == "A1"
 
@@ -225,7 +225,7 @@ async def test_apply_plan_bitbucket():
 @pytest.mark.asyncio
 async def test_apply_plan_bitbucket_on_approve():
     plan = {
-        "target_repo": "imonline/agenticai.agentguardian",
+        "target_repo": "enterprise/agent-guardian",
         "pr_branch": "agent_guardian/review",
         "changes": [
             {
@@ -240,7 +240,7 @@ async def test_apply_plan_bitbucket_on_approve():
     mock_tc.state = {
         "remediation_plan": json.dumps(plan),
         "user_request": "__AG_APPROVE_REMEDIATION__",
-        "_previous_user_request": "https://bitbucket.org/imonline/agenticai.agentguardian/src/main",
+        "_previous_user_request": "https://bitbucket.org/enterprise/agent-guardian/src/main",
     }
 
     _BB = "agent_guardian.tools.bitbucket_tool"
@@ -252,7 +252,7 @@ async def test_apply_plan_bitbucket_on_approve():
             new=AsyncMock(
                 return_value={
                     "status": "ok",
-                    "pr_url": "https://bitbucket.org/imonline/agenticai.agentguardian/pull-requests/1",
+                    "pr_url": "https://bitbucket.org/enterprise/agent-guardian/pull-requests/1",
                     "number": 1,
                 }
             ),
@@ -261,7 +261,7 @@ async def test_apply_plan_bitbucket_on_approve():
         res = await github_apply_remediation_plan(plan=None, tool_context=mock_tc)
 
     assert res["status"] == "ok"
-    assert res["pr_url"] == "https://bitbucket.org/imonline/agenticai.agentguardian/pull-requests/1"
+    assert res["pr_url"] == "https://bitbucket.org/enterprise/agent-guardian/pull-requests/1"
     assert len(res["committed"]) == 1
     assert res["committed"][0]["finding_id"] == "A1"
 
@@ -300,7 +300,7 @@ async def test_bitbucket_multiple_modifications_same_file():
     from agent_guardian.tools.bitbucket_tool import bitbucket_apply_remediation_plan
 
     plan = {
-        "target_repo": "imonline/agenticai.agentguardian",
+        "target_repo": "enterprise/agent-guardian",
         "base_branch": "main",
         "pr_branch": "agent_guardian/review",
         "changes": [

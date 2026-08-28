@@ -47,17 +47,23 @@ def test_setup_cloud_tracing_success(monkeypatch):
     monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "test-gcp-project")
 
     mock_hook = MagicMock()
+    mock_resource = MagicMock()
     with patch("google.adk.telemetry.google_cloud.get_gcp_exporters", return_value=mock_hook) as mock_get:
-        with patch("google.adk.telemetry.setup.maybe_set_otel_providers") as mock_set:
-            result = setup_cloud_tracing(service_name="agent-guardian-test")
-            assert result is True
-            mock_get.assert_called_once_with(
-                enable_cloud_tracing=True,
-                enable_cloud_logging=False,
-                enable_cloud_metrics=False,
-            )
-            mock_set.assert_called_once_with(otel_hooks_to_setup=[mock_hook])
-            assert os.environ.get("OTEL_SERVICE_NAME") == "agent-guardian-test"
+        with patch("google.adk.telemetry.google_cloud.get_gcp_resource", return_value=mock_resource) as mock_res:
+            with patch("google.adk.telemetry.setup.maybe_set_otel_providers") as mock_set:
+                result = setup_cloud_tracing(service_name="agent-guardian-test")
+                assert result is True
+                mock_get.assert_called_once_with(
+                    enable_cloud_tracing=True,
+                    enable_cloud_logging=False,
+                    enable_cloud_metrics=False,
+                )
+                mock_res.assert_called_once_with(project_id="test-gcp-project")
+                mock_set.assert_called_once_with(
+                    otel_hooks_to_setup=[mock_hook],
+                    otel_resource=mock_resource,
+                )
+                assert os.environ.get("OTEL_SERVICE_NAME") == "agent-guardian-test"
 
 
 def test_config_cloud_tracing_fields(monkeypatch):

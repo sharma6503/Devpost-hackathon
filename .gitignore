@@ -14,6 +14,9 @@ wheels/
 .eggs/
 pip-wheel-metadata/
 MANIFEST
+.adk/
+runs/
+
 
 # uv
 .python-version

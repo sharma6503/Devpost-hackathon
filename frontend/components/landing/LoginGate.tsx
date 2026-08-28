@@ -60,7 +60,7 @@ export function LoginGate({ onSuccess }: LoginGateProps) {
             Agent Guardian
           </h1>
           <p className="text-xs text-[var(--color-text-secondary)] font-sans mt-0.5">
-            Mission Control · Operator Sign In
+            Sign In
           </p>
         </div>
 
@@ -69,7 +69,7 @@ export function LoginGate({ onSuccess }: LoginGateProps) {
             htmlFor="ag-username"
             className="text-[11px] font-mono font-semibold uppercase tracking-wider text-[var(--color-text-secondary)]"
           >
-            Operator Username
+            Username
           </label>
           <div className="flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-subtle)] px-3 py-2.5 focus-within:border-[#2525A3] focus-within:ring-1 focus-within:ring-[#2525A3]/30 transition-all">
             <User className="h-4 w-4 text-[#2525A3] dark:text-[#A6C3EE]" />

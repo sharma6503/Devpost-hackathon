@@ -49,9 +49,9 @@
 ### 1. Replaced Datadog with Native Google Cloud Trace (OpenTelemetry)
 - **Purged Datadog Dependencies**: Completely removed all `ddtrace` package dependencies, monkey-patch bootstraps, and Datadog environment variables (`DD_API_KEY`, `DD_SITE`, `DD_LLMOBS_*`, `DD_APM_*`, `DD_SERVICE`, `DD_ENV`, `DD_VERSION`).
 - **Installed OpenTelemetry GCP Exporters**: Added `google-cloud-trace`, `opentelemetry-exporter-gcp-trace`, `opentelemetry-exporter-otlp-proto-http`, and `opentelemetry-resourcedetector-gcp`.
-- **Telemetry Instrumentation Module**: Created [`agent_guardian/utils/tracing.py`](file:///C:/Users/ingsha00/OneDrive%20-%20Ingram%20Micro/Desktop/Devpost-hackathon/Devpost-hackathon-main/agent_guardian/utils/tracing.py) with `setup_cloud_tracing()` and `is_cloud_tracing_enabled()`, using ADK's native `google.adk.telemetry.google_cloud.get_gcp_exporters` and `google.adk.telemetry.setup.maybe_set_otel_providers`.
-- **FastAPI Integration**: Initialized `setup_cloud_tracing()` and passed `otel_to_cloud=is_cloud_tracing_enabled()` into `get_fast_api_app` in [`api/main.py`](file:///C:/Users/ingsha00/OneDrive%20-%20Ingram%20Micro/Desktop/Devpost-hackathon/Devpost-hackathon-main/api/main.py).
-- **Vertex AI Agent Engine Deployment**: Updated [`scripts/deploy_to_agent_engine.py`](file:///C:/Users/ingsha00/OneDrive%20-%20Ingram%20Micro/Desktop/Devpost-hackathon/Devpost-hackathon-main/scripts/deploy_to_agent_engine.py) to enable native ADK telemetry (`enable_tracing=True`) and forward Cloud Trace environment variables.
+- **Telemetry Instrumentation Module**: Created [`agent_guardian/utils/tracing.py`](agent_guardian/utils/tracing.py) with `setup_cloud_tracing()` and `is_cloud_tracing_enabled()`, using ADK's native `google.adk.telemetry.google_cloud.get_gcp_exporters` and `google.adk.telemetry.setup.maybe_set_otel_providers`.
+- **FastAPI Integration**: Initialized `setup_cloud_tracing()` and passed `otel_to_cloud=is_cloud_tracing_enabled()` into `get_fast_api_app` in [`api/main.py`](api/main.py).
+- **Vertex AI Agent Engine Deployment**: Updated [`scripts/deploy_to_agent_engine.py`](scripts/deploy_to_agent_engine.py) to enable native ADK telemetry (`enable_tracing=True`) and forward Cloud Trace environment variables.
 
 ### 2. Production GCS Artifact Storage & Google Artifact Registry
 - **GCS Artifact Service**: Configured `ARTIFACT_SERVICE_URI=gs://agentguardian-prod-artifacts` and `SESSION_SERVICE_TYPE=vertexai` (`agentengine://`) for fully distributed, cloud-persistent session and artifact storage.

@@ -1,9 +1,26 @@
 import os
+import sys
+
+repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if repo_root not in sys.path:
+    sys.path.insert(0, repo_root)
+
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 import vertexai
 from vertexai import types
 from vertexai.preview import reasoning_engines
-from agent_guardian.agent import root_agent
 from dotenv import load_dotenv
+
+# Load environment variables from .env
+load_dotenv()
+
+from agent_guardian.agent import root_agent
 from google.adk.plugins.logging_plugin import LoggingPlugin
 from agent_guardian.utils.token_utils import TokenSafetyPlugin
 from google.adk.plugins import ReflectAndRetryToolPlugin
@@ -11,9 +28,6 @@ from agent_guardian.config import Config
 
 configs = Config()
 
-
-# Load environment variables from .env
-load_dotenv()
 
 # --- Configuration ---
 
@@ -92,7 +106,6 @@ def deploy():
     # Ensure Cloud Trace and telemetry are enabled in Agent Engine
     env_vars.setdefault("ENABLE_CLOUD_TRACING", "true")
     env_vars.setdefault("GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY", "true")
-    env_vars.setdefault("OTEL_SEMCONV_STABILITY_OPT_IN", "gen_ai_agent_spans")
     env_vars.setdefault("OTEL_SERVICE_NAME", "agent-guardian")
 
     # Set default caches to /tmp for managed runtime stability (aligned with Dockerfile)
@@ -111,10 +124,10 @@ def deploy():
     requirements = [
         "google-adk==2.5.0",
         "httpx>=0.28",
-        "google-cloud-aiplatform", # Required for vertexai module during unpickling
+        "google-cloud-aiplatform>=1.158.0",
         "google-genai",
         "cloudpickle",
-        "mcp>=1.0.0",
+        "mcp>=1.0.0,<1.25.0",
         "python-dotenv",
         "pydantic>=2.0.0",
         "beautifulsoup4",
@@ -125,8 +138,19 @@ def deploy():
         "markdown",
         "markdownify",
         "uvicorn",
+        "python-multipart",
+        "google-cloud-secret-manager>=2.28.0",
+        "pyflakes>=3.2.0",
+        "bandit>=1.7.9",
+        "jinja2>=3.1.0",
+        "google-cloud-bigquery>=3.27.0",
+        "google-cloud-bigquery-storage>=2.39.0",
+        "bcrypt>=4.2.0",
+        "pyarrow",
+        "mcpdoc>=0.0.10",
         "opentelemetry-exporter-gcp-trace",
         "opentelemetry-exporter-otlp-proto-http",
+        "opentelemetry-sdk",
         "google-cloud-trace",
     ]
 
@@ -157,7 +181,7 @@ def deploy():
         "requirements": requirements,
         "gcs_dir_name":"agentguardian",
         "env_vars": env_vars,
-        "python_version": "3.13", # Pin to 3.13 to match Dockerfile and ensure compatibility
+        "python_version": "3.11", # Vertex AI Reasoning Engines standard base image
         "identity_type": types.IdentityType.AGENT_IDENTITY,
         "agent_framework": "google-adk",
         "min_instances": 1,

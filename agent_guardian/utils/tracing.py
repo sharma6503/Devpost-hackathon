@@ -64,12 +64,13 @@ def setup_cloud_tracing(
         os.environ.setdefault("OTEL_SERVICE_NAME", service_name)
         os.environ.setdefault(
             "OTEL_RESOURCE_ATTRIBUTES",
-            f"service.name={service_name},service.version=0.1.0,cloud.provider=gcp,cloud.platform=cloud_run",
+            f"service.name={service_name},service.version=0.1.0,cloud.provider=gcp,cloud.platform=cloud_run,gcp.project_id={project}",
         )
-        # Enable GenAI semantic convention message content capture if requested
-        os.environ.setdefault("OTEL_SEMCONV_STABILITY_OPT_IN", "gen_ai_agent_spans")
+        # GenAI span content capture (opt-in to prevent 400 Bad Request from oversized prompt attributes)
+        if os.environ.get("ENABLE_GENAI_SPAN_CONTENT", "").lower() in ("1", "true", "yes"):
+            os.environ.setdefault("OTEL_SEMCONV_STABILITY_OPT_IN", "gen_ai_agent_spans")
 
-        from google.adk.telemetry.google_cloud import get_gcp_exporters
+        from google.adk.telemetry.google_cloud import get_gcp_exporters, get_gcp_resource
         from google.adk.telemetry.setup import maybe_set_otel_providers
 
         gcp_hooks = get_gcp_exporters(
@@ -77,7 +78,11 @@ def setup_cloud_tracing(
             enable_cloud_logging=False,
             enable_cloud_metrics=False,
         )
-        maybe_set_otel_providers(otel_hooks_to_setup=[gcp_hooks])
+        otel_resource = get_gcp_resource(project_id=project)
+        maybe_set_otel_providers(
+            otel_hooks_to_setup=[gcp_hooks],
+            otel_resource=otel_resource,
+        )
 
         logger.info(
             "✓ Google Cloud Trace exporter initialized successfully for project '%s' (service='%s')",

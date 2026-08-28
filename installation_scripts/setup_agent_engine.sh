@@ -15,8 +15,9 @@ echo "Installing uv and other core Python libraries..."
 pip install --no-cache-dir uv google-cloud-aiplatform google-adk
 
 echo "Pre-installing MCP servers..."
-# Ensure the python bin directory is in the path
-export PATH="$(dirname $(which python)):$PATH"
+# Ensure the python bin directory and tool binaries are in the path
+export PATH="$(dirname $(which python)):/usr/local/bin:$PATH"
+export UV_TOOL_BIN_DIR="/usr/local/bin"
 
 # Pre-download MCP servers so they are cached in the container image
 uv tool install mcp-atlassian

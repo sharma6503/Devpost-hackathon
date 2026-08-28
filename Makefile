@@ -16,13 +16,15 @@ FRONTEND_DIR ?= frontend
 NPM ?= npm --prefix $(FRONTEND_DIR)
 
 # Cloud Run / Artifact Registry / GCS Artifacts
-GCP_PROJECT          ?= imgcp-51c5a39739fbedcd
+GCP_PROJECT          ?= project-af920e6d-e11f-4d05-a77
 GCP_REGION           ?= us-central1
 AR_REPO              ?= agent-guardian
-ARTIFACT_BUCKET      ?= agentguardian-prod-artifacts
+ARTIFACT_BUCKET      ?= agentguardian-artifacts-625949521719
 ARTIFACT_SERVICE_URI ?= gs://$(ARTIFACT_BUCKET)
 BACKEND_IMG          := $(GCP_REGION)-docker.pkg.dev/$(GCP_PROJECT)/$(AR_REPO)/backend
 FRONTEND_IMG         := $(GCP_REGION)-docker.pkg.dev/$(GCP_PROJECT)/$(AR_REPO)/frontend
+BACKEND_SERVICE      ?= agent-guardian-backend
+FRONTEND_SERVICE     ?= agent-guardian-frontend
 
 .DEFAULT_GOAL := help
 
@@ -172,23 +174,36 @@ setup-gcs-artifacts: ## Provision the GCS bucket for ADK artifacts storage
 	gcloud storage buckets create gs://$(ARTIFACT_BUCKET) --project=$(GCP_PROJECT) --location=$(GCP_REGION) --uniform-bucket-level-access || true
 
 .PHONY: deploy-backend
-deploy-backend: ## Build via Cloud Build and deploy backend to upskilling-agent-service
+deploy-backend: ## Build via Cloud Build and deploy backend to $(BACKEND_SERVICE)
 	gcloud builds submit --tag $(BACKEND_IMG):latest --project $(GCP_PROJECT) .
-	gcloud run deploy upskilling-agent-service \
+	gcloud run deploy $(BACKEND_SERVICE) \
 		--image $(BACKEND_IMG):latest \
 		--command="" \
 		--args="" \
 		--region $(GCP_REGION) \
 		--project $(GCP_PROJECT) \
-		--update-env-vars "SESSION_SERVICE_URI=agentengine://projects/$(GCP_PROJECT)/locations/$(GCP_REGION)/reasoningEngines/6839756721917788160,ARTIFACT_SERVICE_URI=$(ARTIFACT_SERVICE_URI),ENABLE_CLOUD_TRACING=true,OTEL_SERVICE_NAME=agent-guardian,OTEL_SEMCONV_STABILITY_OPT_IN=gen_ai_agent_spans,GOOGLE_CLOUD_PROJECT=$(GCP_PROJECT),GOOGLE_CLOUD_LOCATION=global,SESSION_LOCATION=$(GCP_REGION),GOOGLE_CLOUD_AGENT_ENGINE_LOCATION=$(GCP_REGION)"
+		--memory=2Gi \
+		--cpu=2 \
+		--timeout=600 \
+		--allow-unauthenticated \
+		--update-env-vars "SESSION_SERVICE_TYPE=vertexai,SESSION_SERVICE_URI=agentengine://projects/625949521719/locations/$(GCP_REGION)/reasoningEngines/1148072108572540928,REASONING_ENGINE_RESOURCE_NAME=projects/625949521719/locations/$(GCP_REGION)/reasoningEngines/1148072108572540928,ARTIFACT_SERVICE_URI=$(ARTIFACT_SERVICE_URI),ARTIFACT_BUCKET=$(ARTIFACT_BUCKET),ENABLE_CLOUD_TRACING=true,OTEL_SERVICE_NAME=agent-guardian,GOOGLE_CLOUD_PROJECT=$(GCP_PROJECT),GOOGLE_CLOUD_LOCATION=global,SESSION_LOCATION=$(GCP_REGION),GOOGLE_CLOUD_AGENT_ENGINE_LOCATION=$(GCP_REGION),GOOGLE_GENAI_USE_VERTEXAI=1,GOOGLE_GENAI_USE_ENTERPRISE=1"
 
 .PHONY: deploy-frontend
-deploy-frontend: ## Build via Cloud Build and deploy frontend to upskilling-agent-service-frontend
+deploy-frontend: ## Build via Cloud Build and deploy frontend to $(FRONTEND_SERVICE)
 	gcloud builds submit --tag $(FRONTEND_IMG):latest --project $(GCP_PROJECT) $(FRONTEND_DIR)
-	gcloud run deploy upskilling-agent-service-frontend \
+	gcloud run deploy $(FRONTEND_SERVICE) \
 		--image $(FRONTEND_IMG):latest \
 		--region $(GCP_REGION) \
-		--project $(GCP_PROJECT)
+		--project $(GCP_PROJECT) \
+		--memory=1Gi \
+		--cpu=1 \
+		--allow-unauthenticated \
+		--update-env-vars "ADK_BASE_URL=https://agent-guardian-backend-625949521719.$(GCP_REGION).run.app"
+
+.PHONY: deploy-agent-engine
+deploy-agent-engine: ## Deploy root_agent to Vertex AI Reasoning Engines (Agent Engine)
+	uv run python scripts/deploy_to_agent_engine.py
+
 
 # --------------------------------------------------------------------------- #
 # Housekeeping

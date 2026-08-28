@@ -77,7 +77,7 @@ def test_format_remediation_plan_md():
         rationale="Pin model version to compliant release.",
     )
     plan = RemediationPlan(
-        target_repo="imonline/agent-guardian",
+        target_repo="agent-guardian/audit-target",
         base_branch="main",
         pr_branch="fix/gov-01",
         pr_title="[Agent Guardian] Pin model version",
